@@ -1,0 +1,19 @@
+[project]
+name = "spectra-cli"
+version = "0.1.0"
+description = "Python wrapper for the Spectra Solana program upgrade diff CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ayodya" }]
+
+[project.scripts]
+spectra-py = "spectra.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["spectra*"]

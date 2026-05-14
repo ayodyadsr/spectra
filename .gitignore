@@ -1,0 +1,11 @@
+/target/
+*.pyc
+__pycache__/
+*.egg-info/
+build/
+dist/
+.venv/
+.DS_Store
+spectra-report.json
+spectra-demo-report.json
+demo.cast

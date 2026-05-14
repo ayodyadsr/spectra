@@ -1,0 +1,58 @@
+name: 'Spectra Program Upgrade Diff'
+description: 'Detect behavioural regressions between two Solana program IDLs in CI'
+author: 'Ayodya'
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  old-idl:
+    description: 'Path to baseline (v_n) IDL JSON'
+    required: true
+  new-idl:
+    description: 'Path to new (v_{n+1}) IDL JSON'
+    required: true
+  report-path:
+    description: 'Where to write the JSON report'
+    required: false
+    default: 'spectra-report.json'
+  format:
+    description: 'Output format passed to spectra (json or markdown)'
+    required: false
+    default: 'json'
+  fail-on-breaking:
+    description: 'If true, the step fails when any breaking finding is reported'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cargo cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ github.action_path }}/..
+
+    - name: Build Spectra
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      run: cargo build --release --bin spectra
+
+    - name: Run Spectra check
+      shell: bash
+      run: |
+        set -e
+        OLD="${{ inputs.old-idl }}"
+        NEW="${{ inputs.new-idl }}"
+        REPORT="${{ inputs.report-path }}"
+        FORMAT="${{ inputs.format }}"
+        BIN="${{ github.action_path }}/../target/release/spectra"
+
+        if [ "${{ inputs.fail-on-breaking }}" = "true" ]; then
+          "$BIN" check --old "$OLD" --new "$NEW" --report "$REPORT" --format "$FORMAT"
+        else
+          "$BIN" check --old "$OLD" --new "$NEW" --report "$REPORT" --format "$FORMAT" || true
+        fi

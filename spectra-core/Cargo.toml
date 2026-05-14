@@ -1,0 +1,23 @@
+[package]
+name = "spectra-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Behavioural-regression diff engine for Solana program upgrades"
+repository = "https://github.com/ayodyadsr/spectra"
+readme = "../README.md"
+
+[lib]
+name = "spectra_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spectra"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"

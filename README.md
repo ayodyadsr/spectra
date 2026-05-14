@@ -42,6 +42,33 @@ Expected: **3 BREAKING + 2 warning**, including:
 
 The CLI exits non-zero on any BREAKING finding so it fails CI cleanly.
 
+### Captured demo output
+
+This is the verbatim markdown report produced by the command above (exit code `1`):
+
+```markdown
+# Spectra Diff Report
+
+**Old program:** `lending`
+**New program:** `lending`
+
+**Findings:** 3 breaking, 2 warning
+
+| Severity | Kind | Detail |
+|---|---|---|
+| BREAKING | instruction_args_changed | `deposit`: [amount: u64] -> [amount: u128] |
+| BREAKING | instruction_removed | `withdraw` (disc b712469c946da122) |
+| warning  | instruction_added | `withdrawFunds` (disc 52b7b3ffcd4ed2be) |
+| warning  | account_field_added | `Pool.fee_bps: u16` |
+| BREAKING | account_field_reordered | `Pool`: [total_supply, rate, authority] -> [total_supply, authority, rate, fee_bps] |
+```
+
+An asciinema cast of the same run is recorded at [`demo.cast`](demo.cast). Replay locally:
+
+```bash
+asciinema play demo.cast
+```
+
 ## Quick start
 
 ```bash
@@ -104,12 +131,14 @@ The full development plan submitted to the Solana Foundation:
 
 ## Demo recording (asciinema)
 
+The cast is committed at [`demo.cast`](demo.cast) in this repo. To regenerate:
+
 ```bash
-./scripts/record-demo.sh
-asciinema upload demo.cast
+./scripts/record-demo.sh   # rewrites demo.cast headlessly
+asciinema play demo.cast   # replay locally
 ```
 
-The recorded cast URL goes in this README once the M0 demo is captured.
+Uploading the cast to asciinema.org is optional and intentionally not done by the script — keep the artifact local so the repo remains the single source of truth.
 
 ## Why this PoC exists
 

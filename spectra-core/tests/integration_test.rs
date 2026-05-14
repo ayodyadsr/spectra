@@ -17,8 +17,8 @@ fn synthetic_regression_demo_detects_breaking_changes() {
         report
     );
     assert!(
-        report.breaking_count >= 3,
-        "expected >=3 breaking findings, got {} (full report: {:#?})",
+        report.breaking_count >= 4,
+        "expected >=4 breaking findings (incl. silent-corruption), got {} (full report: {:#?})",
         report.breaking_count,
         report
     );
@@ -43,6 +43,14 @@ fn synthetic_regression_demo_detects_breaking_changes() {
         .iter()
         .any(|f| matches!(f, Finding::AccountFieldReordered { account, .. } if account == "Pool"));
     assert!(has_pool_reorder, "expected Pool field reorder");
+
+    let has_silent_corruption = report.findings.iter().any(|f| {
+        matches!(f, Finding::AccountLayoutChangedSameDiscriminator { account, .. } if account == "Pool")
+    });
+    assert!(
+        has_silent_corruption,
+        "expected Pool silent-corruption finding (layout changed, discriminator unchanged)"
+    );
 }
 
 #[test]
@@ -56,4 +64,28 @@ fn identical_idls_produce_clean_report() {
         report
     );
     assert_eq!(report.findings.len(), 0);
+}
+
+/// Constructs a small IDL pair where two account names hash to colliding
+/// 8-byte discriminators. We can't easily force a collision via natural names
+/// at test time, so we exercise the detector via two-instructions-with-same-name
+/// edge case is impossible (names are unique by construction). Instead, we
+/// confirm the detector at least runs cleanly on the synthetic fixture and
+/// produces zero false collision findings.
+#[test]
+fn no_false_collision_on_synthetic_fixture() {
+    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
+    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
+    let report = diff_idls(&old, &new);
+    let collisions: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| matches!(f, Finding::DiscriminatorCollision { .. }))
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "expected zero discriminator collisions on the synthetic fixture, got {}: {:#?}",
+        collisions.len(),
+        collisions
+    );
 }

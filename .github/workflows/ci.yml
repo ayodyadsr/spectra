@@ -55,6 +55,14 @@ jobs:
             --format json \
             --report spectra-demo-report.json || true
 
+      - name: Identical-IDL exit-0 check (no false positives)
+        run: |
+          ./target/release/spectra check \
+            --old examples/lending_v1.json \
+            --new examples/lending_v1.json \
+            --format markdown > /dev/null
+          echo "Identical-IDL run exited 0 as required."
+
       - name: Upload demo report
         uses: actions/upload-artifact@v4
         with:

@@ -14,12 +14,32 @@ It sits between two existing layers of the Solana security toolbox:
 
 | Layer | Tool | What it answers |
 |---|---|---|
-| Build provenance | `solana-verifiable-build`, `anchor verify` | "Does the deployed binary match public source?" |
+| Build provenance | `solana-verifiable-build` (distributes `solana-verify` binary), `anchor verify` | "Does the deployed bytecode match the public source after a reproducible Docker build?" |
 | **Behavioural regression** | **Spectra** | **"Does v_{n+1} preserve invariants that v_n holders depend on?"** |
-| Formal verification | OtterSec `solana-verify` | "Are stated invariants provably preserved?" (research-grade, slow) |
+| Formal verification (private, engagement-internal) | Audit-firm internal tooling | "Are stated invariants provably preserved?" (research-grade, slow, not publicly distributed) |
 | Runtime monitor | Hypernative, Range | "Did something go wrong after deploy?" |
 
 Spectra is the lightweight CI-fast-path layer the ecosystem currently lacks. The M0 PoC focuses on the IDL diff surface — the rest of the pipeline (ELF parsing, state replay, invariant DSL) is in the milestone roadmap below.
+
+## M0 scope (this PoC)
+
+Anchor **legacy-schema** IDL JSON diff only. No ELF parsing, no Solana SDK dependency, no network access, no state replay. Detection is correct for Anchor borsh layouts; native `#[repr(C)]` / `bytemuck` alignment is **not** covered until the Shank-IDL path lands in M1.
+
+Detection surface — exhaustive:
+
+| Finding kind | Severity | Notes |
+|---|---|---|
+| `instruction_removed` | BREAKING | Old clients hit `InstructionFallbackNotFound`. |
+| `instruction_args_changed` | BREAKING | Borsh arg length/type mismatch → corrupt deserialise. |
+| `instruction_added` | warning | Informational. |
+| `account_removed` | BREAKING | Old account discriminator no longer accepted. |
+| `account_added` | warning | Informational. |
+| `account_field_removed` | BREAKING | Borsh layout shifts. |
+| `account_field_added` | warning | Informational; protocol must verify `realloc` + rent. |
+| `account_field_reordered` | BREAKING | Borsh layout reorder. |
+| `account_field_type_changed` | BREAKING | Width/encoding change. |
+| `account_layout_changed_same_discriminator` | BREAKING | Silent-corruption case: discriminator stable but layout changed. |
+| `discriminator_collision` | BREAKING | Two IDL names sharing the truncated 8-byte SHA-256. |
 
 ## Demo
 
@@ -32,19 +52,20 @@ cargo build --release
   --format markdown
 ```
 
-Expected: **3 BREAKING + 2 warning**, including:
+Expected: **4 BREAKING + 2 warning**, including:
 
-- `withdraw` instruction removed — old clients invoking the v1 discriminator silently fail.
+- `withdraw` instruction removed — old clients invoking the v1 discriminator hit `InstructionFallbackNotFound`.
 - `deposit.amount` widened `u64 -> u128` — caller serialisation length mismatches; the call decodes as a corrupt argument.
-- `Pool` account fields reordered — existing on-chain accounts deserialise into wrong field positions (silent data corruption).
+- `Pool` account fields reordered — existing on-chain accounts deserialise into wrong field positions.
+- `Pool` layout changed but discriminator unchanged — the **silent-corruption** case: the runtime accepts the old account data and reads it into the new layout, producing wrong-field reads with no error.
 - `Pool.fee_bps` field added — informational, but applicant must verify storage-resize is handled.
 - `withdrawFunds` instruction added — informational, replaces removed `withdraw`.
 
-The CLI exits non-zero on any BREAKING finding so it fails CI cleanly.
+The CLI exits non-zero on any BREAKING finding so it fails CI cleanly. A separate test asserts `spectra check --old X --new X` produces a clean report with zero findings (no false positives on identical inputs).
 
 ### Captured demo output
 
-This is the verbatim markdown report produced by the command above (exit code `1`):
+Verbatim markdown report from the command above (exit code `1`):
 
 ```markdown
 # Spectra Diff Report
@@ -52,7 +73,7 @@ This is the verbatim markdown report produced by the command above (exit code `1
 **Old program:** `lending`
 **New program:** `lending`
 
-**Findings:** 3 breaking, 2 warning
+**Findings:** 4 breaking, 2 warning
 
 | Severity | Kind | Detail |
 |---|---|---|
@@ -61,6 +82,7 @@ This is the verbatim markdown report produced by the command above (exit code `1
 | warning  | instruction_added | `withdrawFunds` (disc 52b7b3ffcd4ed2be) |
 | warning  | account_field_added | `Pool.fee_bps: u16` |
 | BREAKING | account_field_reordered | `Pool`: [total_supply, rate, authority] -> [total_supply, authority, rate, fee_bps] |
+| BREAKING | account_layout_changed_same_discriminator | `Pool` layout changed but discriminator f19a6d0411b16dbc is unchanged (silent-corruption risk) |
 ```
 
 An asciinema cast of the same run is recorded at [`demo.cast`](demo.cast). Replay locally:
@@ -68,6 +90,19 @@ An asciinema cast of the same run is recorded at [`demo.cast`](demo.cast). Repla
 ```bash
 asciinema play demo.cast
 ```
+
+## What Spectra does NOT do (M0)
+
+Explicit non-claims so the tool is judged honestly:
+
+- No ELF `.so` parsing (planned for M1 follow-on work; not in this grant scope without further milestones).
+- No PDA-derivation drift via BPF disassembly — research item, not promised here.
+- No mainnet snapshot replay — M2 (grant-scope) uses `litesvm` with a hand-curated per-pilot transaction corpus, not mainnet replay.
+- No invariant DSL — protocol-specific invariants are out of scope; Spectra is a schema-regression gate, not a verifier.
+- No Token-2022 extension TLV layout detection — IDL does not describe TLV; separate detector pack.
+- No constant / `.rodata` diffing.
+- No upgrade-authority transfer detection (out-of-band action, not visible to a static diff).
+- No native-program `#[repr(C)]` alignment-aware diff until Shank-IDL support lands in M1.
 
 ## Quick start
 
@@ -123,11 +158,11 @@ The full development plan submitted to the Solana Foundation:
 
 | Milestone | Deliverable | Status |
 |---|---|---|
-| **M0** | IDL diff prototype on one Anchor program, public repo, green CI | **This PoC** |
-| M1 | `spectra-core` Rust crate with ELF parsing, full Anchor + native IDL diff, discriminator drift detection, golden-file test suite | Pending grant |
-| M2 | `solana-program-test` integration, mainnet snapshot loader, replay corpus runner | Pending grant |
-| M3 | TOML invariant DSL, runner, structured JSON report, composite GitHub Action on Marketplace | Pending grant |
-| M4 | 3 protocol pilots integrating Spectra; mdBook docs; Solana Discord office hours AMA | Pending grant |
+| **M0** | Anchor legacy-schema IDL diff (9 finding kinds + silent-corruption + discriminator-collision); 5 tests green; demo cast; public repo | **This PoC** |
+| M1 | Anchor 2026 (Codama) schema parser + Shank native IDL parser + defined-type/events/errors diff + Loader-version adapter | Pending grant |
+| M2 | `litesvm` pre-deployment harness driven by hand-curated per-pilot transaction corpus (≤50 tx, ≤60s in CI). Not mainnet replay. | Pending grant |
+| M3 | `spectra-allow.toml` suppression file + composite GitHub Action + PR comment integration | Pending grant |
+| M4 | ≥1 confirmed pilot + 2 public walkthroughs against real upgradable Anchor programs; mdBook docs; Solana Discord AMA | Pending grant |
 
 ## Demo recording (asciinema)
 

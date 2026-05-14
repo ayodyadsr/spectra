@@ -50,6 +50,10 @@ fn kind_label(f: &Finding) -> &'static str {
         Finding::AccountFieldAdded { .. } => "account_field_added",
         Finding::AccountFieldRemoved { .. } => "account_field_removed",
         Finding::AccountFieldTypeChanged { .. } => "account_field_type_changed",
+        Finding::AccountLayoutChangedSameDiscriminator { .. } => {
+            "account_layout_changed_same_discriminator"
+        }
+        Finding::DiscriminatorCollision { .. } => "discriminator_collision",
     }
 }
 
@@ -107,5 +111,22 @@ fn detail(f: &Finding) -> String {
         } => {
             format!("`{}.{}`: {} -> {}", account, field, old_ty, new_ty)
         }
+        Finding::AccountLayoutChangedSameDiscriminator {
+            account,
+            discriminator,
+        } => format!(
+            "`{}` layout changed but discriminator {} is unchanged (silent-corruption risk)",
+            account, discriminator
+        ),
+        Finding::DiscriminatorCollision {
+            kind_a,
+            name_a,
+            kind_b,
+            name_b,
+            discriminator,
+        } => format!(
+            "{} `{}` and {} `{}` share discriminator {}",
+            kind_a, name_a, kind_b, name_b, discriminator
+        ),
     }
 }

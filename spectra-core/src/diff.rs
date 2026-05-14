@@ -48,6 +48,25 @@ pub enum Finding {
         old_ty: String,
         new_ty: String,
     },
+    /// Silent-corruption case: account name (and therefore Anchor discriminator)
+    /// unchanged between versions, but at least one field-level breaking change
+    /// is present. The runtime accepts the old account data and deserialises
+    /// it into the new layout, producing wrong-field reads.
+    AccountLayoutChangedSameDiscriminator {
+        account: String,
+        discriminator: String,
+    },
+    /// Two distinct IDL names produce the same truncated 8-byte SHA-256
+    /// discriminator. Either an accidental collision (vanishingly rare for
+    /// human names but possible) or an attacker-introduced one. Either way
+    /// the dispatcher will mis-route.
+    DiscriminatorCollision {
+        kind_a: String,
+        name_a: String,
+        kind_b: String,
+        name_b: String,
+        discriminator: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -60,6 +79,8 @@ pub enum Severity {
 impl Finding {
     pub fn severity(&self) -> Severity {
         match self {
+            Finding::AccountLayoutChangedSameDiscriminator { .. }
+            | Finding::DiscriminatorCollision { .. } => Severity::Breaking,
             Finding::InstructionRemoved { .. }
             | Finding::InstructionArgsChanged { .. }
             | Finding::AccountRemoved { .. }
@@ -93,6 +114,8 @@ pub fn diff_idls(old: &Idl, new: &Idl) -> DiffReport {
 
     diff_instructions(&old.instructions, &new.instructions, &mut findings);
     diff_accounts(old, new, &mut findings);
+    detect_silent_corruption(&mut findings);
+    detect_discriminator_collisions(new, &mut findings);
 
     let breaking_count = findings
         .iter()
@@ -109,6 +132,61 @@ pub fn diff_idls(old: &Idl, new: &Idl) -> DiffReport {
         findings,
         breaking_count,
         warning_count,
+    }
+}
+
+fn detect_silent_corruption(findings: &mut Vec<Finding>) {
+    let mut accounts_with_breaking_field_change: Vec<String> = findings
+        .iter()
+        .filter_map(|f| match f {
+            Finding::AccountFieldReordered { account, .. }
+            | Finding::AccountFieldRemoved { account, .. }
+            | Finding::AccountFieldTypeChanged { account, .. } => Some(account.clone()),
+            _ => None,
+        })
+        .collect();
+    accounts_with_breaking_field_change.sort();
+    accounts_with_breaking_field_change.dedup();
+
+    for account in accounts_with_breaking_field_change {
+        findings.push(Finding::AccountLayoutChangedSameDiscriminator {
+            discriminator: hex(&account_discriminator(&account)),
+            account,
+        });
+    }
+}
+
+fn detect_discriminator_collisions(new: &Idl, findings: &mut Vec<Finding>) {
+    let mut seen: HashMap<[u8; 8], (String, String)> = HashMap::new();
+
+    for ix in &new.instructions {
+        let d = instruction_discriminator(&ix.name);
+        if let Some(prior) = seen.get(&d) {
+            findings.push(Finding::DiscriminatorCollision {
+                kind_a: prior.0.clone(),
+                name_a: prior.1.clone(),
+                kind_b: "instruction".into(),
+                name_b: ix.name.clone(),
+                discriminator: hex(&d),
+            });
+        } else {
+            seen.insert(d, ("instruction".into(), ix.name.clone()));
+        }
+    }
+
+    for acc in &new.accounts {
+        let d = account_discriminator(&acc.name);
+        if let Some(prior) = seen.get(&d) {
+            findings.push(Finding::DiscriminatorCollision {
+                kind_a: prior.0.clone(),
+                name_a: prior.1.clone(),
+                kind_b: "account".into(),
+                name_b: acc.name.clone(),
+                discriminator: hex(&d),
+            });
+        } else {
+            seen.insert(d, ("account".into(), acc.name.clone()));
+        }
     }
 }
 

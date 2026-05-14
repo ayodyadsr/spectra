@@ -21,6 +21,27 @@ It sits between two existing layers of the Solana security toolbox:
 
 Spectra is the lightweight CI-fast-path layer the ecosystem currently lacks. The M0 PoC focuses on the IDL diff surface — the rest of the pipeline (ELF parsing, state replay, invariant DSL) is in the milestone roadmap below.
 
+## Documentation
+
+The engineering hardening package lives under [`docs/`](docs/). Start here:
+
+| Document | Purpose |
+|----------|---------|
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Adversary classes, trust assumptions, soundness / completeness / robustness failure modes |
+| [docs/NON_GOALS.md](docs/NON_GOALS.md) | What Spectra is explicitly **not** — compatibility ≠ correctness |
+| [docs/SEVERITY.md](docs/SEVERITY.md) | Canonical rule IDs + severities + exit-code contract |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | M0–M3 pipeline + determinism guarantees |
+| [docs/SOLANA_EDGE_CASES.md](docs/SOLANA_EDGE_CASES.md) | Per-edge-case coverage matrix (today / M1 / permanently out of scope) |
+| [docs/FALSE_POSITIVES.md](docs/FALSE_POSITIVES.md) | Five-layer FP mitigation strategy + suppression schema |
+| [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md) | Drop-in GitHub Actions / pre-commit / `cargo make` templates |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Milestones gated by acceptance tests |
+| [docs/CORPUS.md](docs/CORPUS.md) | Three-layer detection corpus design |
+| [docs/REPLAY.md](docs/REPLAY.md) | M2 `litesvm` bounded-replay architecture |
+| [docs/RULE_ENGINE.md](docs/RULE_ENGINE.md) | M0 comparator module + M1 `Rule` trait + `RuleRegistry` |
+| [docs/MIGRATION.md](docs/MIGRATION.md) | `spectra-allow.toml` migration-declaration schema |
+| [docs/ANCHOR.md](docs/ANCHOR.md) | Anchor-specific compatibility hazards (Borsh, discriminators, zero-copy, events) |
+| [docs/ADOPTION.md](docs/ADOPTION.md) | Adoption plan + trust signals + pilot strategy |
+
 ## M0 scope (this PoC)
 
 Anchor **legacy-schema** IDL JSON diff only. No ELF parsing, no Solana SDK dependency, no network access, no state replay. Detection is correct for Anchor borsh layouts; native `#[repr(C)]` / `bytemuck` alignment is **not** covered until the Shank-IDL path lands in M1.

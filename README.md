@@ -27,6 +27,8 @@ The engineering hardening package lives under [`docs/`](docs/). Start here:
 
 | Document | Purpose |
 |----------|---------|
+| [docs/VS_GIT_DIFF.md](docs/VS_GIT_DIFF.md) | Head-to-head against `git diff` — what diff cannot do, and where Spectra is fundamentally different (start here if you are asking "isn't this just a fancy diff?") |
+| [docs/BENCHMARK.md](docs/BENCHMARK.md) | Reproducible before/after walkthrough on the M0 fixture, with verbatim diff + Spectra outputs and wall-clock timing |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Adversary classes, trust assumptions, soundness / completeness / robustness failure modes |
 | [docs/NON_GOALS.md](docs/NON_GOALS.md) | What Spectra is explicitly **not** — compatibility ≠ correctness |
 | [docs/SEVERITY.md](docs/SEVERITY.md) | Canonical rule IDs + severities + exit-code contract |

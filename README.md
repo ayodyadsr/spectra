@@ -119,18 +119,26 @@ Spectra is therefore complementary, not substitutive, to every tool in this list
 
 ## Team
 
+- **Team Name:** Ayodya (independent contributor)
+- **Contact Name:** Ayodya
+- **Contact Email:** ayodyadsr@gmail.com
+- **Website / Repository:** https://github.com/ayodyadsr/spectra
+
 ### Team members
 
 - **Ayodya** (lead engineer, sole maintainer for M0–M4 scope)
 
-### Team Contact
+#### LinkedIn Profiles (if available)
 
-- Email: ayodyadsr@gmail.com
-- GitHub: [@ayodyadsr](https://github.com/ayodyadsr)
+- Available privately upon request from the grant committee; not publicly listed.
 
 ### Team Code Repos
 
-- Spectra PoC (this repo): https://github.com/ayodyadsr/spectra
+- Spectra (this repo): https://github.com/ayodyadsr/spectra
+
+### Team GitHub Accounts
+
+- https://github.com/ayodyadsr
 
 ### Team's Experience
 
@@ -286,6 +294,11 @@ This roadmap is the version submitted to the Solana Foundation. Every milestone 
 
 | Number | Deliverable | Specification |
 | ---: | --- | --- |
+| 0a. | License | Apache License 2.0 (applied at M0 in [`LICENSE`](LICENSE); remains in force for the full project lifetime). |
+| 0b. | Documentation | Inline Rustdoc on all public crate items (`cargo doc --no-deps` builds cleanly under `-D missing_docs`); per-new-rule entry in [`docs/SEVERITY.md`](docs/SEVERITY.md); per-edge-case row in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) updated with Codama + Shank parser stage. |
+| 0c. | Testing and Testing Guide | Golden-file test suite covering 8 documented breakage classes added to `spectra-core/tests/`; `cargo test --release` continues to be the single test entry; testing guide published as `docs/TESTING.md` describing how to add a new golden case. |
+| 0d. | Repository | All M1 source, tests, golden fixtures, and parser adapter code committed to https://github.com/ayodyadsr/spectra; release tagged `v0.2.0-m1`; reproduces deterministically from a clean clone. |
+| 0e. | Article | Tutorial article `docs/TUTORIAL_M1.md` walking through Anchor 2026 (Codama) + Shank native-IDL diffing on a worked public-program example, linked from the README documentation index. |
 | 1.1 | Anchor 2026 (Codama) parser | Auto-detection at `Idl::from_path`; full coverage of the Codama node graph. |
 | 1.2 | Shank native IDL parser | Anchor-free path for native programs; surfaces `#[repr(C)]` / `bytemuck` alignment padding the legacy IDL omits. |
 | 1.3 | Defined-type resolution | Nested `types`, `events`, and `errors` diffed via reference graph (M0 ignores them). |
@@ -359,6 +372,54 @@ Full methodology, raw measurements, and reproduction commands: [`docs/COMPETITIV
 
 ---
 
+## Testing & Verification Strategy
+
+Every milestone is **gated by acceptance tests**, not by activity. Each deliverable below maps to a specific check a grant reviewer can run on the linked commit.
+
+**Static checks (gated in CI on every push, all milestones):**
+- `cargo fmt -- --check` — formatting deviation fails CI.
+- `cargo clippy --all-targets -- -D warnings` — every warning is an error.
+- `cargo build --release` — release build must succeed on Linux GHA runner.
+
+**Test suite (gated in CI):**
+- `cargo test --release` — currently 8 tests pass (2 unit + 6 integration), including:
+  - Anchor known-vector discriminator assertion: `sha256("global:initialize")[..8] = afaf6d1f0d989bed`.
+  - Synthetic-regression detection: 4 BREAKING + 2 warning findings on the `lending_v1 → lending_v2` fixture.
+  - Identical-IDL clean-report invariant: `spectra check --old X --new X` produces zero findings.
+  - No-false-positive collision: two non-colliding discriminators must not be flagged.
+  - SARIF output schema validity: emitted SARIF parses as JSON and contains required top-level keys.
+  - SARIF clean-empty: zero findings produces a valid SARIF document with an empty `results` array.
+  - Markdown silent-corruption row: the silent-corruption finding is correctly rendered in Markdown.
+
+**End-to-end demo gates (gated in CI):**
+- Demo exit-1: `spectra check` on the bundled `lending_v1 → lending_v2` fixture must exit `1`.
+- Identical-IDL exit-0: same file as `--old` and `--new` must exit `0`.
+- SARIF JSON parse: `--format sarif` output piped through `python -m json.tool` must succeed and exit `1`.
+- Exit-2 invocation error: `--format definitely-not-a-format` must exit `2` (not `1` and not `0`).
+- `--quiet` no-output-on-clean: identical-IDL run with `--quiet` must produce zero stdout.
+
+**Real-world validation:**
+- Drift Protocol v2.155 → v2.162 (428 KB IDL, 20,138 lines, 249 instructions, 27 accounts) — reproducible via the commands in [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md). Wall-clock 6 ms, 6 findings including one real silent-corruption case on `PerpMarket`. Identical-IDL invariant verified on this 428 KB production input.
+
+**Competitive verification:**
+- Head-to-head against `diff -u` 3.10, `jd` 1.9.2, `dyff` 1.10, `json-diff` 1.0.6 on the same Drift IDL pair — reproducible via the commands in [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md). Best of 5 wall-clock runs each.
+
+**Milestone-by-milestone acceptance gates** are listed in [`docs/ROADMAP.md`](docs/ROADMAP.md). Each milestone tag (`v0.2.0-m1`, `v0.3.0-m2`, etc.) will reference the specific CI run that validates the milestone is complete. M0 acceptance criteria have all passed as of commit [`2c42501`](https://github.com/ayodyadsr/spectra/commit/2c42501) (CI run [25915263868](https://github.com/ayodyadsr/spectra/actions/runs/25915263868)).
+
+**Reproduction from a clean clone:**
+```bash
+git clone https://github.com/ayodyadsr/spectra && cd spectra
+cargo test --release                               # 8 tests pass
+./target/release/spectra check \
+  --old examples/lending_v1.json \
+  --new examples/lending_v2.json                   # exit 1
+./target/release/spectra check \
+  --old examples/lending_v1.json \
+  --new examples/lending_v1.json                   # exit 0
+```
+
+---
+
 ## Future Plans
 
 **Maintenance Commitment:**
@@ -379,6 +440,45 @@ Beyond the funded milestones, the applicant commits to maintaining Spectra for a
 - Establish Spectra as the default CI-time upgrade-safety gate for Solana programs, analogous to the role `slither` plays for Solidity.
 - Expand the rule catalogue to cover Token-2022 TLV extensions (currently out of scope) and a richer set of native-program patterns as Shank-IDL adoption grows.
 - Contribute the diff engine as a reusable Rust crate so audit firms and downstream tools can embed it without forking.
+
+---
+
+## Success Metrics
+
+Success is measured against **acceptance tests defined in [`docs/ROADMAP.md`](docs/ROADMAP.md)**, not against adoption marketing numbers. Every metric below is binary (pass/fail) and verifiable from public CI artifacts.
+
+**Engineering metrics (gated per milestone, not subjective):**
+
+| Metric | M0 (shipped) | M1 target | M2 target | M3 target |
+|---|---|---|---|---|
+| Rule types covered | 11 / 23 | 17 / 23 | 20 / 23 | 23 / 23 |
+| Solana edge cases covered ([`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md), n=25) | 6 (24%) | 14 (56%) | 15 (60%) + 2 partial | 17 (68%) + 3 partial |
+| Tests passing (`cargo test --release`) | 8 / 8 ✅ | golden-file suite ≥ 16 / 16 | + corpus harness ≥ 4 / 4 | + suppression-file parse ≥ 4 / 4 |
+| CI gates green | 9 / 9 ✅ | 11 / 11 | 13 / 13 | 14 / 14 |
+| False positives on production IDL (Drift) | 0 / 0 ✅ | 0 / 0 | 0 / 0 | 0 / 0 |
+| Wall-clock on 428 KB Drift IDL | 6 ms ✅ | ≤ 20 ms | ≤ 20 ms (static) + ≤ 60 s (M2 corpus) | ≤ 20 ms |
+
+**Adoption gates (M4 deliverables, not vanity metrics):**
+
+| Metric | M4 target | How verified |
+|---|---|---|
+| Confirmed pilot integration | ≥ 1 | Public CI logs on pilot's repo running `spectra check` as a gate. |
+| Public integration walkthroughs | ≥ 2 | Plain markdown write-ups committed to this repo's `walkthroughs/`, each linking commits + CI runs + diff reports on a real upgradeable Anchor program. |
+| Community office hour | 1 | Solana Discord AMA recording published. |
+
+**Sustainability gates (post-grant, voluntary commitments):**
+
+| Metric | Commitment |
+|---|---|
+| Issue triage SLA | 7 days during grant period; 14 days for 12 months post-M4. |
+| Critical-bug response | 48 hr from confirmed reproduction. |
+| New BPF-loader version adapter | Published within 4 weeks of mainnet activation. |
+| Apache 2.0 license | Permanent — license change requires a major version bump and 30-day public notice. |
+
+**Non-metrics (intentionally not tracked):**
+
+- GitHub stars, NPM downloads, social media followers — these are vanity metrics that do not measure whether Spectra prevents silent corruption in production upgrades. The acceptance tests above measure that directly.
+- Number of "rules" added vs the published M1–M3 plan — over-rule-ification is a known FP risk and is intentionally bounded at 23 rules through M2. Going beyond requires a documented edge-case entry in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md) first.
 
 ---
 

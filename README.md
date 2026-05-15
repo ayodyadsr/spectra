@@ -21,7 +21,7 @@ Solana programs are almost always deployed via an *upgradeable* BPF loader. The 
 Spectra targets exactly these two Solana-specific hazards, plus 9 other rules covering the conventional shape-of-the-interface changes that break old clients.
 
 **Founder Interest:**
-The applicant has 20+ years in offensive security (most recently Red Team lead at Bank Mandiri) and built numerous CI-time security gates for production engineering teams. The dominant pattern in audit findings on Solana programs is *not* the kind of arithmetic bug fuzzers find — it is shape mismatches between the deployed program and the data already on chain. Spectra is the smallest tool that closes that gap, and the gap was named directly in the open [Solana forum RFP "Program Verification Tooling"](https://forum.solana.com/t/program-verification-tooling/1032).
+The applicant has 20+ years in offensive security (most recently Red Team lead at Indonesia's largest commercial bank by assets) and built numerous CI-time security gates for production engineering teams. The dominant pattern in audit findings on Solana programs is *not* the kind of arithmetic bug fuzzers find — it is shape mismatches between the deployed program and the data already on chain. Spectra is the smallest tool that closes that gap, and the gap was named directly in the open [Solana forum RFP "Program Verification Tooling"](https://forum.solana.com/t/program-verification-tooling/1032).
 
 ### Project Details
 
@@ -134,7 +134,7 @@ Spectra is therefore complementary, not substitutive, to every tool in this list
 
 ### Team's Experience
 
-20+ years of offensive-security and detection-engineering work, most recently Red Team lead at Bank Mandiri (Indonesia's largest bank by assets). Three skill surfaces map one-to-one onto Spectra's three core surfaces:
+20+ years of offensive-security and detection-engineering work, most recently Red Team lead at Indonesia's largest commercial bank by assets (a top-tier Southeast Asian financial institution serving 29M+ users). Three skill surfaces map one-to-one onto Spectra's three core surfaces:
 
 1. **Binary diffing for vulnerability discovery** ↔ Spectra's discriminator and layout diff engine.
 2. **Authoring static analysers and detection signatures** ↔ Spectra's M0 11-rule catalogue and the M1 `Rule` trait roadmap in [`docs/RULE_ENGINE.md`](docs/RULE_ENGINE.md).

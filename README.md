@@ -549,6 +549,7 @@ Every claim in this README is backed by one of these docs. Start with whichever 
 
 | If you want to know… | Read |
 |---|---|
+| The single-file top-level engineering specification | [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md) |
 | The full technical story end-to-end (academic-style) | [`docs/PAPER.md`](docs/PAPER.md) |
 | Whether `git diff` is good enough (no — formal argument) | [`docs/VS_GIT_DIFF.md`](docs/VS_GIT_DIFF.md) |
 | The reproducible synthetic before/after walkthrough | [`docs/BENCHMARK.md`](docs/BENCHMARK.md) |

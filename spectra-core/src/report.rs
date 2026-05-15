@@ -1,6 +1,15 @@
+//! Report renderers for [`DiffReport`]: Markdown for humans, SARIF 2.1.0 for
+//! GitHub Code Scanning. JSON is produced directly via `serde_json` in the
+//! CLI entry point and does not need its own renderer.
+
 use crate::diff::{DiffReport, Finding, Severity};
 use serde_json::{json, Value};
 
+/// Render the diff report as a human-readable Markdown document.
+///
+/// Output includes program names, breaking/warning counts, and a table of
+/// findings. When the report is clean the table is replaced with a single
+/// success line.
 pub fn render_markdown(report: &DiffReport) -> String {
     let mut out = String::new();
     out.push_str("# Spectra Diff Report\n\n");

@@ -35,7 +35,9 @@ make demo
 
 ## Issue triage SLA
 
-During the grant period: all issues triaged within 7 days. Tag bugs `bug`, feature requests `enhancement`, security findings `security` (please do not file public issues for exploitable findings; email instead — see SECURITY.md once published).
+During the grant period: all issues triaged within 7 days. Tag bugs `bug`, feature requests `enhancement`, security findings `security`. Please do not file public issues for exploitable findings — the private-reporting policy, supported-versions table, and response SLAs are documented in [`SECURITY.md`](SECURITY.md). Issue and PR templates live under [`.github/`](.github/).
+
+All contributors are expected to follow the [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor Covenant 2.1). User-visible changes should land with a [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` entry in the same PR.
 
 ## Out of scope (for now)
 

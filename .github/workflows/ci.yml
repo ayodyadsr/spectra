@@ -102,3 +102,42 @@ jobs:
             spectra-demo-report.md
             spectra-demo-report.json
             spectra-demo-report.sarif
+
+  docker:
+    name: Docker build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: spectra:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke — synthetic regression exits 1
+        run: |
+          set +e
+          docker run --rm spectra:ci check \
+            --old /examples/lending_v1.json \
+            --new /examples/lending_v2.json \
+            --format markdown > /dev/null
+          EXIT=$?
+          set -e
+          test "$EXIT" = "1" || (echo "Expected exit 1 from container demo, got $EXIT"; exit 1)
+          echo "Container demo exited 1 as required."
+
+      - name: Smoke — identical IDL exits 0 (no false positives)
+        run: |
+          docker run --rm spectra:ci check \
+            --old /examples/lending_v1.json \
+            --new /examples/lending_v1.json \
+            --format markdown > /dev/null
+          echo "Container identical-IDL run exited 0 as required."

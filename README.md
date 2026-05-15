@@ -253,6 +253,8 @@ cargo test --release
 asciinema play demo.cast
 ```
 
+For a hermetic, container-only reproduction with no Rust toolchain on the host, see the multi-stage [`Dockerfile`](Dockerfile) — also exercised on every push by the `docker` CI job. Full step-by-step testing guide: [`docs/TESTING.md`](docs/TESTING.md).
+
 ### What the report looks like
 
 Verbatim output of the demo command above (exit code `1`):
@@ -566,6 +568,7 @@ Every claim in this README is backed by one of these docs. Start with whichever 
 | `spectra-allow.toml` migration-declaration schema | [`docs/MIGRATION.md`](docs/MIGRATION.md) |
 | Anchor-specific hazards (Borsh, discriminators, zero-copy, events) | [`docs/ANCHOR.md`](docs/ANCHOR.md) |
 | Adoption plan + pilot strategy | [`docs/ADOPTION.md`](docs/ADOPTION.md) |
+| Step-by-step testing guide (host + Docker + real-world IDL) | [`docs/TESTING.md`](docs/TESTING.md) |
 
 ---
 
@@ -594,4 +597,12 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issue triage SLA during the grant peri
 
 ## Security
 
-Please do not file public issues for exploitable security findings. Contact the maintainer privately at ayodyadsr@gmail.com. A formal `SECURITY.md` policy will be published after the grant decision.
+Please do not file public issues for exploitable security findings. Vulnerability-reporting policy, supported-versions table, and response SLAs are documented in [`SECURITY.md`](SECURITY.md). Reports go privately to `ayodyadsr@gmail.com`.
+
+## Code of Conduct
+
+This project follows the Contributor Covenant 2.1 — see [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
+## Changelog
+
+Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md) in [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format.

@@ -1,0 +1,9 @@
+target/
+.git/
+.github/
+docs/
+demo.cast
+scripts/
+spectra-action/
+spectra-cli/
+*.md

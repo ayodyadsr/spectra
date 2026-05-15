@@ -27,6 +27,7 @@ The engineering hardening package lives under [`docs/`](docs/). Start here:
 
 | Document | Purpose |
 |----------|---------|
+| [docs/PAPER.md](docs/PAPER.md) | Q1-style technical paper — formal problem characterization, structurally undetectable finding classes, coverage matrix against 25 Solana upgrade concerns, synthetic + real-world Drift evaluation |
 | [docs/VS_GIT_DIFF.md](docs/VS_GIT_DIFF.md) | Head-to-head against `git diff` — what diff cannot do, and where Spectra is fundamentally different (start here if you are asking "isn't this just a fancy diff?") |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | Reproducible before/after walkthrough on the M0 fixture, with verbatim diff + Spectra outputs and wall-clock timing |
 | [docs/BENCHMARK_DRIFT.md](docs/BENCHMARK_DRIFT.md) | Real-world benchmark on Drift Protocol v2.155 → v2.162 (428 KB production IDL): silent-corruption case caught on `PerpMarket` in 6 ms across 319 changed lines, zero false positives on identical input |

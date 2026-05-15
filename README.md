@@ -125,7 +125,7 @@ Spectra is therefore complementary, not substitutive, to every tool in this list
 
 ### Team Contact
 
-- Email: badtousai@gmail.com
+- Email: ayodyadsr@gmail.com
 - GitHub: [@ayodyadsr](https://github.com/ayodyadsr)
 
 ### Team Code Repos
@@ -463,4 +463,4 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issue triage SLA during the grant peri
 
 ## Security
 
-Please do not file public issues for exploitable security findings. Contact the maintainer privately at badtousai@gmail.com. A formal `SECURITY.md` policy will be published after the grant decision.
+Please do not file public issues for exploitable security findings. Contact the maintainer privately at ayodyadsr@gmail.com. A formal `SECURITY.md` policy will be published after the grant decision.

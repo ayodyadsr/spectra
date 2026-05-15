@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Python wrapper for the Spectra Solana program upgrade diff CLI"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Ayodya" }]
 
 [project.scripts]

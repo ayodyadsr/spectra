@@ -80,7 +80,7 @@ Adoption is also gated by the **looks-trustworthy** signals reviewers check:
 
 | Signal | Status |
 |--------|--------|
-| MIT license | ✅ (LICENSE in repo) |
+| Apache-2.0 license | ✅ (LICENSE in repo) |
 | CI green on every push | ✅ (badge in README) |
 | Asciinema cast committed | ✅ (`demo.cast`) |
 | Per-rule documentation | ✅ ([SEVERITY.md](SEVERITY.md)) |

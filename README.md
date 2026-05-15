@@ -5,7 +5,7 @@
 > **Status:** M0 PoC — works on Anchor IDL files today; bigger features come with grant milestones M1–M3.
 
 [![CI](https://github.com/ayodyadsr/spectra/actions/workflows/ci.yml/badge.svg)](https://github.com/ayodyadsr/spectra/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 ---
 
@@ -313,7 +313,7 @@ Spectra is built and maintained by **Ayodya** — 20+ years of penetration testi
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Contributing
 

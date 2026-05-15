@@ -2,7 +2,7 @@
 name = "spectra-core"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "Behavioural-regression diff engine for Solana program upgrades"
 repository = "https://github.com/ayodyadsr/spectra"
 readme = "../README.md"

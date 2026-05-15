@@ -16,7 +16,7 @@ The roadmap is intentionally conservative. Milestones are sized for a single eng
 - JSON + markdown report formats.
 - 5/5 tests green (Anchor-vector discriminator, synthetic-regression integration, identical-IDL clean-report, no-false-positive collision, account-discriminator name distinction).
 - CI workflow: fmt + clippy `-D warnings` + build + test + demo-exit-1 + identical-IDL exit-0 + JSON demo + artifact upload.
-- Public repo, MIT-licensed, asciinema cast committed.
+- Public repo, Apache-2.0-licensed, asciinema cast committed.
 
 **Acceptance tests (all PASS as of commit `e5aad06`, CI run `25851086148`):**
 

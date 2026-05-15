@@ -12,6 +12,14 @@
 **Project Description:**
 Spectra is an open-source CLI and GitHub Action that diffs two versions of a Solana program at the Anchor IDL level and reports the upgrade hazards that would silently corrupt existing on-chain state or misroute existing client calls. It runs in roughly **6 milliseconds** on a 428 KB production IDL, emits machine-readable JSON, human-readable Markdown, or SARIF 2.1.0 (uploaded straight to GitHub's Security tab), and gates a CI build with a severity-tiered exit code. Every claim in this README is reproducible from the commit it points to.
 
+**Problem Statement:**
+
+Solana program teams shipping upgrades into production face three concrete problems that no public tool currently fills end-to-end:
+
+1. **Silent on-chain data corruption on upgrade.** The Solana BPF Loader does not validate that the new program is compatible with on-chain accounts already deserialised by the old program. A reordered field, a `u64 → u128` widening, or a padding-byte-to-config-byte conversion deserialises against the new layout without error — data on chain becomes wrong. The closest layer (audit-firm formal verification) costs $15k–$100k per engagement and only covers a single revision.
+2. **Discriminator collisions are not statically checked.** Anchor and Shank both derive 8-byte instruction tags from `sha256("global:<name>")[..8]`. Two human-chosen names colliding in 8-byte truncated SHA-256 space is a real practical risk, and a colliding pair silently misroutes calls between instructions. No existing diff tool computes discriminators.
+3. **No CI-gateable upgrade-safety regression check exists in public tooling.** `solana-verifiable-build` answers "does the deployed bytecode match source?" (build provenance — a different layer). `diff -u` / `jd` / `dyff` / `json-diff` either trip on harmless reformat or block every additive change, and none knows what an Anchor discriminator is. Audit-firm formal verification is the next layer up by cost and scope. The middle layer — "did this upgrade preserve old users' data and old clients' calls?" — is open, and is named directly in the Solana Foundation's open RFP [Program Verification Tooling](https://forum.solana.com/t/program-verification-tooling/1032).
+
 **Solana Integration:**
 Solana programs are almost always deployed via an *upgradeable* BPF loader. The loader does not check that the new program is compatible with the old program's on-chain accounts. Two classes of upgrade hazard therefore exist on Solana that do not exist on most other L1s:
 
@@ -22,6 +30,15 @@ Spectra targets exactly these two Solana-specific hazards, plus 9 other rules co
 
 **Founder Interest:**
 The applicant has 20+ years in offensive security (most recently Red Team lead at Indonesia's largest commercial bank by assets) and built numerous CI-time security gates for production engineering teams. The dominant pattern in audit findings on Solana programs is *not* the kind of arithmetic bug fuzzers find — it is shape mismatches between the deployed program and the data already on chain. Spectra is the smallest tool that closes that gap, and the gap was named directly in the open [Solana forum RFP "Program Verification Tooling"](https://forum.solana.com/t/program-verification-tooling/1032).
+
+**Expected Impact:**
+
+Concrete, verifiable outcomes the project delivers (each maps to evidence already in this repo):
+
+1. **Pre-deploy detection of silent on-chain corruption.** Verified end-to-end on the Drift Protocol v2.155 → v2.162 upgrade pair: Spectra surfaced the real `PerpMarket` padding-to-config conversion in 6 ms, where a 393-line `diff -u` would have required a 7-step Anchor + Borsh inference chain by a human reviewer. Evidence: [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md).
+2. **CI-gateable severity contract that integrates with existing GitHub Security tooling.** SARIF 2.1.0 output uploads to GitHub Code Scanning via the standard `github/codeql-action/upload-sarif@v3` action — same surface as CodeQL — with a 4-level exit-code contract (`0`/`1`/`2`/`3`) verified by 3 dedicated CI steps. Evidence: [`docs/SEVERITY.md`](docs/SEVERITY.md), [`docs/CI_INTEGRATION.md`](docs/CI_INTEGRATION.md).
+3. **Fills the named gap between build-provenance verification and audit-firm formal verification.** The Solana Foundation RFP explicitly identifies upgrade-safety regression as a missing layer. Spectra is the smallest credible filling: a single-binary CLI, ~6 ms on a 428 KB production IDL, ~1.5× the wall-clock of `diff -u` while doing dramatically more useful work. Evidence: [forum.solana.com RFP](https://forum.solana.com/t/program-verification-tooling/1032) + [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md).
+4. **Reproducibility-by-construction.** Every claim in this README points back to a commit hash and a CI run URL on https://github.com/ayodyadsr/spectra. Identical-IDL-input emits zero findings, verified by both a test and a CI step against a 428 KB production input — i.e. the false-positive floor is established on real data, not synthesised. Evidence: CI run [25924418961](https://github.com/ayodyadsr/spectra/actions/runs/25924418961).
 
 ### Project Details
 
@@ -193,6 +210,20 @@ A human reviewer with a 393-line `diff -u` would need to do a 7-step Anchor + Bo
 - **No PDA-drift detection.** Marked as Future Expansion in the proposal, not promised in this grant.
 - **Native-program `#[repr(C)]` / `bytemuck` alignment padding** is not surfaced in Anchor IDL; will be addressed in M1 with Shank-IDL parsing.
 - **`spectra-allow.toml` suppression file** for intentional schema extensions does not yet exist; lands in M3.
+
+**Research & Preparation Completed (pre-grant, at the applicant's own cost):**
+
+The work below was completed and pushed to https://github.com/ayodyadsr/spectra *before* this grant application, both to mitigate the "no prior Solana-specific OSS contributions" risk and to make the engineering claims independently reproducible by a reviewer:
+
+1. **Ecosystem and RFP analysis.** Surveyed the Solana forum's open [Program Verification Tooling RFP](https://forum.solana.com/t/program-verification-tooling/1032), the Anchor + Foundation GitHub orgs, and prior grant rounds. Identified that the named gap (upgrade-safety regression) sits between `solana-verifiable-build` (build provenance) and audit-firm formal verification — no public tool fills it.
+2. **Solana-edge-case taxonomy.** Catalogued 25 documented Solana program upgrade hazards in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md), classified by detection layer (static-IDL / runtime-replay / out-of-scope) and used to define the per-milestone coverage targets in [Success Metrics](#success-metrics).
+3. **M0 engineering shipped.** Rust core engine + Python wrapper + GitHub Action scaffold + CI workflow (`fmt` + `clippy -D warnings` + `build` + `test` + 5 demo-gate steps) + 8 green tests (2 unit + 6 integration) including the Anchor known-vector assertion `sha256("global:initialize")[..8] = afaf6d1f0d989bed`. All from commit `e42a0c1` onward, all CI green.
+4. **Real-world validation on Drift Protocol v2.155 → v2.162.** 428 KB production Anchor IDL, 20,138 lines, 249 instructions. Spectra surfaced 6 findings in 6 ms, including the real `PerpMarket` padding-to-config silent-corruption case. Identical-IDL exit-0 invariant verified on the same 428 KB input. Reproduction commands: [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md).
+5. **Competitive head-to-head benchmark.** Wall-clock + behavioural comparison against `diff -u` (GNU 3.10), `jd` 1.9.2, `dyff`, `json-diff` (npm) on the same Drift IDL pair. Spectra is the only one that distinguishes BREAKING from warning via exit code, the only one that does not trip on `prettier --write` whitespace reformat, and the only one that can detect silent corruption at all. Methodology + raw measurements: [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md).
+6. **Q1-style technical paper.** ~600-line, 9-section document at [`docs/PAPER.md`](docs/PAPER.md) covering threat model, rule taxonomy, coverage analysis with correct denominator (n=25), real-world validation, competitive benchmark, threats to validity, and bibliography.
+7. **Engineering documentation suite.** 17+ docs under [`docs/`](docs/) covering threat model, non-goals, severity contract, architecture, edge-case matrix, false-positive policy, CI integration templates, rule-engine internals, migration / suppression schema, Anchor-specific hazards, adoption plan, and roadmap with acceptance gates.
+8. **License hardening.** Relicensed MIT → Apache 2.0 on 2026-05-15 for the explicit patent grant in Apache §3, aligning with `solana-verifiable-build`, the Solana SDK, and Anza-published developer tooling. Canonical Apache 2.0 text from apache.org (`md5 3b83ef96387f14655fc854ddc3c6bd57`).
+9. **Reproducible demo.** Asciinema cast committed at [`demo.cast`](demo.cast), regenerable from [`scripts/record-demo.sh`](scripts/record-demo.sh). Verbatim report output embedded in this README (see [§Quick Start](#quick-start)).
 
 ---
 

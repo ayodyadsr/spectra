@@ -31,6 +31,7 @@ The engineering hardening package lives under [`docs/`](docs/). Start here:
 | [docs/VS_GIT_DIFF.md](docs/VS_GIT_DIFF.md) | Head-to-head against `git diff` — what diff cannot do, and where Spectra is fundamentally different (start here if you are asking "isn't this just a fancy diff?") |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | Reproducible before/after walkthrough on the M0 fixture, with verbatim diff + Spectra outputs and wall-clock timing |
 | [docs/BENCHMARK_DRIFT.md](docs/BENCHMARK_DRIFT.md) | Real-world benchmark on Drift Protocol v2.155 → v2.162 (428 KB production IDL): silent-corruption case caught on `PerpMarket` in 6 ms across 319 changed lines, zero false positives on identical input |
+| [docs/COMPETITIVE_BENCHMARK.md](docs/COMPETITIVE_BENCHMARK.md) | Head-to-head against `diff -u`, `jd`, `dyff`, `json-diff` on real Drift IDL: Spectra is the only tool that clears all three CI-gate bars (severity-aware exit, no false positives on reformatting, additive ≠ blocking) and is ~16× faster than the next semantic tool |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Adversary classes, trust assumptions, soundness / completeness / robustness failure modes |
 | [docs/NON_GOALS.md](docs/NON_GOALS.md) | What Spectra is explicitly **not** — compatibility ≠ correctness |
 | [docs/SEVERITY.md](docs/SEVERITY.md) | Canonical rule IDs + severities + exit-code contract |
@@ -151,19 +152,20 @@ cargo test --release
 ## CLI reference
 
 ```
-spectra check --old <PATH> --new <PATH> [--report <PATH>] [--format json|markdown]
+spectra check --old <PATH> --new <PATH> [--report <PATH>] [--format json|markdown|sarif] [--quiet]
 ```
 
 - `--old` — baseline IDL (the program version currently deployed)
 - `--new` — candidate IDL (the version you are about to upgrade to)
 - `--report` — optional path to also write the report to disk
-- `--format` — `json` (default, machine-parseable) or `markdown` (PR-comment friendly)
+- `--format` — `json` (default, machine-parseable), `markdown` (PR-comment friendly), or `sarif` (SARIF 2.1.0 for GitHub code scanning / Advanced Security)
+- `--quiet` — suppress stdout report on clean runs; exit code still signals status. Useful for CI where only failing runs should produce noise.
 
 Exit codes:
 
 - `0` — no breaking findings
 - `1` — at least one breaking finding
-- `2` — invocation error (bad path, parse failure)
+- `2` — invocation error (bad path, parse failure, unknown `--format`)
 
 ## Project layout
 

@@ -63,6 +63,37 @@ jobs:
             --format markdown > /dev/null
           echo "Identical-IDL run exited 0 as required."
 
+      - name: SARIF output smoke check
+        run: |
+          ./target/release/spectra check \
+            --old examples/lending_v1.json \
+            --new examples/lending_v2.json \
+            --format sarif \
+            --report spectra-demo-report.sarif || EXIT=$?
+          test "${EXIT:-0}" = "1" || (echo "Expected exit 1 on synthetic regression in SARIF mode"; exit 1)
+          python3 -c "import json,sys; d=json.load(open('spectra-demo-report.sarif')); assert d['version']=='2.1.0', 'bad SARIF version'; assert d['runs'][0]['tool']['driver']['name']=='Spectra'; assert len(d['runs'][0]['results'])>=6, 'expected >=6 results'; print('SARIF OK: '+str(len(d['runs'][0]['results']))+' results')"
+
+      - name: Quiet-mode exit-2 check (unknown --format)
+        run: |
+          set +e
+          ./target/release/spectra check \
+            --old examples/lending_v1.json \
+            --new examples/lending_v2.json \
+            --format definitely-not-a-format > /dev/null 2>&1
+          EXIT=$?
+          set -e
+          test "$EXIT" = "2" || (echo "Expected exit 2 on invocation error, got $EXIT"; exit 1)
+          echo "Invocation error exited 2 as required."
+
+      - name: Quiet-mode no-output-on-clean check
+        run: |
+          OUT=$(./target/release/spectra check \
+            --old examples/lending_v1.json \
+            --new examples/lending_v1.json \
+            --format markdown --quiet)
+          test -z "$OUT" || (echo "Expected --quiet on clean run to produce empty stdout"; exit 1)
+          echo "--quiet suppressed stdout on clean run as required."
+
       - name: Upload demo report
         uses: actions/upload-artifact@v4
         with:
@@ -70,3 +101,4 @@ jobs:
           path: |
             spectra-demo-report.md
             spectra-demo-report.json
+            spectra-demo-report.sarif

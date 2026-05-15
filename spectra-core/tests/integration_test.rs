@@ -1,4 +1,8 @@
-use spectra_core::{diff_idls, Finding, Idl};
+use spectra_core::{
+    diff_idls,
+    report::{render_markdown, render_sarif},
+    Finding, Idl,
+};
 use std::path::PathBuf;
 
 fn examples_dir() -> PathBuf {
@@ -87,5 +91,84 @@ fn no_false_collision_on_synthetic_fixture() {
         "expected zero discriminator collisions on the synthetic fixture, got {}: {:#?}",
         collisions.len(),
         collisions
+    );
+}
+
+#[test]
+fn sarif_output_is_valid_for_synthetic_fixture() {
+    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
+    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
+    let report = diff_idls(&old, &new);
+
+    let sarif_text = render_sarif(&report, "examples/lending_v2.json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&sarif_text).expect("SARIF output must parse as JSON");
+
+    assert_eq!(parsed["version"], "2.1.0", "SARIF version must be 2.1.0");
+    assert!(parsed["$schema"].is_string(), "SARIF must declare $schema");
+
+    let runs = parsed["runs"].as_array().expect("runs must be an array");
+    assert_eq!(runs.len(), 1, "expected exactly one SARIF run");
+    let run = &runs[0];
+
+    assert_eq!(run["tool"]["driver"]["name"], "Spectra");
+    assert!(
+        run["tool"]["driver"]["rules"]
+            .as_array()
+            .map(|r| !r.is_empty())
+            .unwrap_or(false),
+        "rules catalog must be non-empty"
+    );
+
+    let results = run["results"].as_array().expect("results must be an array");
+    assert_eq!(
+        results.len(),
+        report.findings.len(),
+        "SARIF result count must match Finding count"
+    );
+
+    let has_silent_corruption_error = results.iter().any(|r| {
+        r["ruleId"] == "account_layout_changed_same_discriminator" && r["level"] == "error"
+    });
+    assert!(
+        has_silent_corruption_error,
+        "silent-corruption finding must appear as level=error in SARIF"
+    );
+
+    for r in results {
+        let loc = &r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"];
+        assert_eq!(
+            loc, "examples/lending_v2.json",
+            "every result must carry the new-IDL artifact location"
+        );
+    }
+}
+
+#[test]
+fn sarif_clean_report_has_zero_results() {
+    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
+    let new = old.clone();
+    let report = diff_idls(&old, &new);
+    let sarif_text = render_sarif(&report, "examples/lending_v1.json");
+    let parsed: serde_json::Value = serde_json::from_str(&sarif_text).expect("parse SARIF");
+    let results = parsed["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    assert!(
+        results.is_empty(),
+        "identical input must produce zero SARIF results, got {}",
+        results.len()
+    );
+}
+
+#[test]
+fn markdown_renderer_still_produces_silent_corruption_row() {
+    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
+    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
+    let report = diff_idls(&old, &new);
+    let md = render_markdown(&report);
+    assert!(
+        md.contains("account_layout_changed_same_discriminator"),
+        "markdown must call out silent-corruption finding by kind"
     );
 }

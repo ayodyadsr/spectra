@@ -177,6 +177,14 @@ answers.
 The behavioral regression layer is unoccupied by any public, free, CI-integrable tool.
 This paper presents Spectra as the first instantiation of this layer.
 
+A reviewer may reasonably ask whether a generic structural JSON diff tool — `jd`,
+`dyff`, `json-diff`, or even GNU `diff -u` — would be adequate as a stopgap.
+§5.6 answers this empirically by benchmarking all four against Spectra on the
+identical real-world Drift IDL pair: each generic tool fails at least one of the
+three CI-gate preconditions (severity-gated exit, no false positive on
+whitespace reformat, additive change does not block merge), and none can detect
+the two structurally-undetectable finding classes proved in §3.2.
+
 ---
 
 ## 3. Problem Characterization
@@ -512,6 +520,49 @@ usable as a `required` CI check on real protocols.
 Full reproducibility commands and the line-by-line analysis of the silent-corruption
 case are in `BENCHMARK_DRIFT.md` [Spectra-BENCHMARK-DRIFT].
 
+### 5.6 Head-to-Head Against Generic Diff Tools
+
+To rule out the hypothesis "an existing JSON / YAML diff tool is good enough,"
+Spectra was benchmarked against four publicly available structural diff tools
+on the identical Drift IDL pair: GNU `diff -u` 3.10 [GNU-DIFFUTILS], `jd` 1.9.2
+[Burnett-JD], `dyff` [Homeport-DYFF], and `json-diff` [Vit-JSONDIFF]. The
+selection criterion was: any CLI tool with public install instructions that
+takes two JSON or YAML files and reports a structural diff. No tool with Anchor
+or Solana semantics was found in the survey, consistent with §1.2's research-gap
+claim and the unresolved Anchor issue #2452.
+
+**Table 9: Competitive performance on Drift v2.155 → v2.162 (428 KB, 5 runs each).**
+
+| Tool | Mean wall-clock | Severity-gated exit | Whitespace-reformat ⇒ exit | `R-ACC-SILENT-CORRUPT` detection |
+|------|----------------:|---------------------|---------------------------|----------------------------------|
+| `diff -u` | 5.0 ms | none | **1** (39,715 noise lines) | no |
+| `jd` | 32.4 ms | none (1 on any change) | 0 | no |
+| `dyff` | 106 ms | **always 0** (incl. breaking) | 0 | no |
+| `json-diff` | 9,217 ms | none (1 on any change) | 0 | no |
+| **Spectra** | **6.6 ms** | **0 / 1 / 2 / 3** | **0** | **yes** |
+
+Spectra is the only tool in the survey that satisfies the three preconditions of
+a CI gate simultaneously: (1) exit 0 on additive-only upgrades, (2) exit non-zero
+on actually breaking upgrades, (3) zero false positives on whitespace reformatting.
+Each generic tool fails at least one precondition. Crucially, the
+silent-corruption case `R-ACC-SILENT-CORRUPT` is **not detectable** by any of the
+four generic tools, consistent with the structural-undetectability proof of §3.2:
+the finding requires combining (a) the Anchor discriminator algorithm and (b)
+the *absence* of a discriminator change with (c) the *presence* of a layout
+change. No generic JSON differ has access to fact (a), and no purely textual diff
+can encode the logical conjunction of "absence" and "presence" as a single
+named finding. The full per-tool methodology, raw measurements, and reproduction
+commands are published as `COMPETITIVE_BENCHMARK.md` [Spectra-COMPETITIVE].
+
+**Performance interpretation.** Spectra is ~16× faster than the fastest
+*structural* alternative (`jd`) and within 1.5× of textual `diff -u` while doing
+strictly more useful work — computing Anchor discriminators, distinguishing
+silent corruption, and emitting severity-gated exit codes. The 9-second
+`json-diff` figure illustrates that some popular structural differs are not
+viable as CI gates on real-world Solana IDL at all; this is non-trivial when the
+candidate tool is sometimes recommended as a "drop-in solution" in informal
+Solana discussions.
+
 **What this real-world result does not prove.** It does not prove that Drift's
 specific upgrade was *actually* unsafe — the padding-to-config conversion is safe if
 all on-chain `PerpMarket` accounts had `padding[22] = 0` before upgrade. Spectra
@@ -707,8 +758,26 @@ https://github.com/ayodyadsr/spectra/blob/main/docs/SOLANA_EDGE_CASES.md
 [Spectra-VS-DIFF] Ayodya. *docs/VS_GIT_DIFF.md*.
 https://github.com/ayodyadsr/spectra/blob/main/docs/VS_GIT_DIFF.md
 
+[Spectra-COMPETITIVE] Ayodya. *docs/COMPETITIVE_BENCHMARK.md* — head-to-head
+benchmark against `diff -u`, `jd`, `dyff`, `json-diff` on the Drift IDL pair.
+https://github.com/ayodyadsr/spectra/blob/main/docs/COMPETITIVE_BENCHMARK.md
+
 [Spectra-NON-GOALS] Ayodya. *docs/NON_GOALS.md*.
 https://github.com/ayodyadsr/spectra/blob/main/docs/NON_GOALS.md
+
+**Competing JSON/YAML diff tools surveyed in §5.6:**
+
+[GNU-DIFFUTILS] Free Software Foundation. *GNU diffutils 3.10*.
+https://www.gnu.org/software/diffutils/
+
+[Burnett-JD] Burnett, J. *jd — a commandline utility for diffing and patching
+JSON and YAML values*, v1.9.2. https://github.com/josephburnett/jd
+
+[Homeport-DYFF] Homeport. *dyff — a diff tool for YAML files, and sometimes
+JSON*. https://github.com/homeport/dyff
+
+[Vit-JSONDIFF] Tarasenko, A. *json-diff — structural diff for JSON files*.
+https://github.com/andreyvit/json-diff
 
 **Real-world IDL artifacts:**
 

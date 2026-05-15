@@ -2,7 +2,7 @@
 
 Spectra is **CI-native**: its purpose is to fail a pre-merge build before a layout-breaking upgrade lands. This document gives drop-in templates for the three integration paths that cover the majority of Solana repositories today.
 
-All examples use the M0 CLI shape: `spectra check --old <PATH> --new <PATH> [--format json|markdown] [--report <PATH>]`. The M3 composite Action will package the same logic into a single `uses:` line; the templates below are what teams can deploy today against the M0 binary.
+All examples use the M0 CLI shape: `spectra check --old <PATH> --new <PATH> [--format json|markdown|sarif] [--report <PATH>] [--quiet]`. The M3 composite Action will package the same logic into a single `uses:` line; the templates below are what teams can deploy today against the M0 binary.
 
 ---
 
@@ -123,6 +123,33 @@ Invoke with `cargo make spectra-check`.
 
 ---
 
+## 3b. GitHub Code Scanning (SARIF upload, M0-compatible)
+
+Spectra emits SARIF 2.1.0 with `--format sarif`. Upload it via `github/codeql-action/upload-sarif` and findings appear under the repository's Security → Code scanning alerts tab — the same surface GitHub Advanced Security uses for CodeQL.
+
+```yaml
+- name: Run Spectra (SARIF)
+  run: |
+    spectra check \
+      --old /tmp/old.json \
+      --new /tmp/new.json \
+      --format sarif \
+      --report spectra.sarif || true   # never short-circuit the upload
+
+- name: Upload SARIF to GitHub Code Scanning
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: spectra.sarif
+    category: spectra
+```
+
+The `|| true` guard lets the SARIF artifact upload before the workflow fails on a BREAKING exit; the Code Scanning surface still receives the finding even when the gate blocks merge. Each Spectra finding maps to a SARIF `result` with the rule ID equal to the Spectra finding kind (e.g. `account_layout_changed_same_discriminator`) and `level` derived from severity (`error` for BREAKING, `warning` for warning). The result's `logicalLocations` carry the account/instruction name so the GitHub UI shows a stable navigation handle even though IDL JSON has no line numbers.
+
+This is the only path among the surveyed JSON diff tools (`diff -u`, `jd`, `dyff`, `json-diff`) that integrates with GitHub's first-party security surface — see [COMPETITIVE_BENCHMARK.md](COMPETITIVE_BENCHMARK.md) §2.
+
+---
+
 ## 4. M3 composite Action (pending grant)
 
 M3 packages all of the above as a single composite Action so the consumer YAML collapses to:
@@ -160,7 +187,11 @@ When Spectra fails CI on your PR, **do not** suppress blindly. The recommended t
 
 ## 6. Performance budget
 
-M0 cold-run on a 10-instruction / 5-account IDL pair on a free-tier `ubuntu-latest` runner completes in well under 1 second. The M2 replay milestone is bounded to ≤ 60 s end-to-end so the total Spectra step in a typical PR stays under the threshold where maintainers begin treating CI as a tax.
+Measured on a commodity Linux x86_64 host: Spectra completes in **~2 ms** on a small 10-instruction / 5-account IDL pair, and in **~6 ms** on Drift Protocol's real 428 KB production IDL (249 instructions, 27 accounts, 115 types). Free-tier `ubuntu-latest` runners are 2–5× slower across the board, so the total Spectra step in a typical PR stays well under 100 ms before any IDL build overhead — orders of magnitude under the threshold where maintainers begin treating CI as a tax.
+
+The M2 replay milestone is bounded to ≤ 60 s end-to-end so the full pipeline (M0 schema diff + M2 corpus replay) remains under the same CI-time budget.
+
+Raw measurements (5 runs per tool, both fixtures, head-to-head against `diff -u`, `jd`, `dyff`, `json-diff`) are in [COMPETITIVE_BENCHMARK.md](COMPETITIVE_BENCHMARK.md).
 
 ---
 

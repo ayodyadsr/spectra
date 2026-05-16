@@ -1,101 +1,126 @@
 # Threat Model
 
-This document is the explicit threat model for Spectra. It enumerates the adversary classes Spectra is designed to help against, the trust assumptions Spectra makes, and the failure modes (soundness / completeness / robustness) under which Spectra may produce wrong answers.
+This is the explicit threat model for Spectra: the adversary / failure sources
+it is designed to help against, the trust assumptions it makes, and the
+failure modes (soundness / completeness / robustness) under which it may
+produce a wrong answer.
 
-Spectra is **deterministic structural-compatibility analysis**, not formal verification and not runtime monitoring. Every claim below is bounded accordingly.
+Spectra is **deterministic, strictly-differential account-validation
+regression analysis** of Anchor source — not formal verification, not an
+absolute scanner, not runtime monitoring. Every claim below is bounded
+accordingly.
 
 ---
 
-## 1. Adversary classes
+## 1. Adversary / failure-source classes
 
 | ID | Class | Description | Spectra's role |
-|----|-------|-------------|---------------|
-| A1 | Honest-but-rushed maintainer | A protocol engineer ships an upgrade that unintentionally breaks Borsh layout, removes an instruction, widens an argument, or reorders an account field. | **Primary target.** Spectra fails CI before the upgrade reaches mainnet. |
-| A2 | Inattentive reviewer | The PR is reviewed but the layout-breaking change is missed visually (e.g. a one-line field reorder buried in a 600-line diff). | **Primary target.** Spectra produces a deterministic, structured finding the reviewer cannot overlook. |
-| A3 | Malicious maintainer with merge access | An insider deliberately ships a layout-changing upgrade designed to corrupt existing on-chain accounts in their favour. | **Partial target.** Spectra surfaces the change, but cannot prevent merge if the same actor can also disable CI. Defence depends on branch-protection rules outside Spectra. |
-| A4 | External PR submitter (no merge access) | A non-maintainer opens a PR introducing a silent-corruption change. | **Primary target.** Spectra's job is to make the change visible during review. |
-| A5 | Build-supply-chain attacker | An attacker substitutes the binary or the IDL between source and deployment. | **Out of scope.** Build-provenance tools (`solana-verifiable-build` and its `solana-verify` binary) cover this layer. Spectra explicitly does not. |
+|---|---|---|---|
+| A1 | Honest-but-rushed maintainer | An engineer ships an upgrade that unintentionally downgrades `Account<T>` to `UncheckedAccount`, deletes a `has_one` / `constraint`, drops a `seeds`/`bump`, or removes a `Signer` — with **no compiler error**, because Anchor enforces guards at runtime. | **Primary target.** Spectra fails CI before the upgrade reaches mainnet. |
+| A2 | Inattentive reviewer | The guard removal is a one-line type change buried in a large refactor PR and is missed visually. | **Primary target.** Spectra emits a deterministic, typed finding the reviewer cannot overlook. |
+| A3 | Malicious maintainer with merge access | An insider deliberately removes a guard to enable a later drain. | **Partial target.** Spectra surfaces the regression, but cannot prevent merge if the same actor can also disable CI. Defence depends on branch-protection rules outside Spectra. |
+| A4 | External PR submitter (no merge access) | A non-maintainer opens a PR that silently weakens a guard. | **Primary target.** Spectra's job is to make the regression visible during review. |
+| A5 | Build-supply-chain attacker | An attacker substitutes the binary or the source between review and deployment. | **Out of scope.** Build-provenance tools (`solana-verifiable-build` / `anchor verify`) cover this. Spectra does not. |
 
-Spectra is most useful against A1, A2, A4 (unintentional regressions and inattentive review). It is partially useful against A3 (visibility) and explicitly does **not** replace A5's tooling (build provenance).
+Spectra is most useful against A1, A2, A4 (unintentional or unnoticed
+regressions). It is partially useful against A3 (visibility) and explicitly
+does **not** replace A5's tooling.
 
 ---
 
 ## 2. Trust assumptions
 
-Spectra **trusts** the following inputs as authoritative:
+Spectra **trusts** the following as authoritative:
 
-- The two IDL JSON files supplied via `--old` and `--new`. Spectra makes no claim that these IDLs accurately describe the deployed `.so`; that is the job of `solana-verifiable-build` / `anchor verify`.
-- The Anchor legacy IDL schema's documented discriminator algorithm: `sha256("global:<name>")[..8]` for instructions, `sha256("account:<name>")[..8]` for accounts.
-- The Borsh serialization rules (positional, no padding) for the layout-diff finding kinds.
+- The two Anchor source trees supplied via `--baseline` and `--candidate`.
+  Spectra makes **no** claim that the baseline tree corresponds to the
+  on-chain bytecode — that is `solana-verifiable-build` / `anchor verify`
+  territory.
+- That the baseline tree is the *last released / on-chain-deployed* version.
+  The differential guarantee is only as good as that premise; selecting the
+  baseline is an adoption concern (auto-baseline = last on-chain version),
+  not an engine concern.
+- Anchor's documented guard semantics: typed wrappers enforce owner + 8-byte
+  discriminator; `#[account(...)]` constraints are enforced at runtime.
 
-Spectra makes **no** assumption about:
-
-- Network state, slot height, clock, randomness.
-- The reproducibility of the build that produced the deployed program.
-- The honesty of the actor who supplied the IDL.
-
-If the supplied IDL is forged or stripped, Spectra's findings remain internally consistent for that IDL pair but may not reflect the truly deployed program. This is an explicit limitation, not a bug.
+Spectra makes **no** assumption about network state, clock, randomness, build
+reproducibility, or the honesty of the actor who supplied the trees. If the
+baseline tree is forged or stale, the findings remain internally consistent
+for that pair but may not reflect the truly deployed program. This is an
+explicit limitation, not a bug.
 
 ---
 
 ## 3. Failure modes
 
-Spectra has three orthogonal failure modes. Each is documented with the conditions under which it can occur and the user-visible signal that flags it.
+### 3.1 Soundness (false positives)
 
-### 3.1 Soundness failures (false positives)
+A soundness failure is a BREAKING finding that does not in fact remove a
+guarantee. The strictly-differential design makes this **near-zero by
+construction**:
 
-A soundness failure is a BREAKING finding that does not in fact break upgrade compatibility.
+- Identical input trees → zero findings (tested invariant + CI step).
+- A finding requires a guard present in the baseline slot and absent from
+  the candidate slot.
+- The downgrade-vs-equivalent-pin logic (see [SEVERITY.md](SEVERITY.md) §3
+  and [FALSE_POSITIVES.md](FALSE_POSITIVES.md)) suppresses the obvious FP
+  class: a guard re-expressed but still enforced (e.g. `Account<T>` →
+  `#[account(owner = …)] UncheckedAccount`) produces **no** finding.
 
-| Cause | Example | Mitigation |
-|-------|---------|------------|
-| Cosmetic rename of a field that the protocol's own client code already adapts to | Renaming `total_supply` -> `totalSupply` while updating all callers in lockstep | `spectra-allow.toml` suppression with rationale + expiry (M3) |
-| Pre-launch program with no on-chain accounts yet | Field reorder is meaningless because nothing depends on it | Manual review; suppression with `pre_launch = true` rationale |
-| Explicit migration where the protocol code resets affected accounts | Anchor 0.30+ explicit discriminator override paired with an `init` re-set | `migration_declared = "..."` marker in `spectra-allow.toml` (M3) |
+Residual FP sources and their mitigation (M3 `spectra-allow.toml` with
+mandatory rationale + expiry): an intentional, reviewed guard relaxation
+paired with a compensating off-`#[derive(Accounts)]` check the engine cannot
+see; a pre-launch program where no on-chain account yet depends on the guard.
+Concrete FP-rate observation is part of M4 (≥1 pilot + 2 walkthroughs).
 
-Spectra's documented design target is **a false-positive rate low enough for default-on CI gating**, with the suppression file (M3) as the mandatory escape valve. Concrete FP-rate measurement is part of M4 (≥1 pilot + 2 walkthroughs).
+### 3.2 Completeness (false negatives)
 
-### 3.2 Completeness failures (false negatives)
+A completeness failure is a real account-validation regression Spectra does
+**not** detect at M0. Documented, not silent:
 
-A completeness failure is a real upgrade hazard Spectra does **not** detect. Every known false-negative class is documented in [SOLANA_EDGE_CASES.md](SOLANA_EDGE_CASES.md). Highlights:
+- Native (non-Anchor) manual `is_signer` / `owner ==` / `key ==` checks —
+  M1 deliverable.
+- Whole-context removal — interface change, opt-in strict mode in M1.
+- A guard enforced *outside* `#[derive(Accounts)]` (manual `require!()` in the
+  instruction body) — M1 native-path scope.
+- A regression where the guard was *already missing in the baseline* — this
+  is **by construction** out of scope (absolute-scanner territory), not a
+  false negative.
 
-- Zero-copy (`bytemuck`, `#[repr(C)]`) padding-aware layout changes — IDL does not surface padding.
-- Token-2022 TLV extensions — IDL does not represent TLV.
-- PDA seed-derivation drift — requires BPF disassembly; explicitly Future Expansion, not M0–M3.
-- Cross-program invocation contract changes — Spectra sees one program at a time.
-- Constant / `.rodata` changes (e.g. switching a fee constant from 30 bps to 300 bps) — out of scope for M0–M3.
+Each is in the README's "What Spectra does NOT do" section and in
+[NON_GOALS.md](NON_GOALS.md) so reviewers cannot mistake silence for
+coverage.
 
-Each of these is listed in the README's "What Spectra does NOT do" section so reviewers cannot mistake silence for coverage.
+### 3.3 Robustness (malformed input)
 
-### 3.3 Robustness failures (malformed input)
+Spectra refuses to produce a misleading clean report:
 
-Spectra refuses to analyse rather than producing a misleading clean report.
-
-- Unparseable IDL JSON -> exit code `2` (invocation error).
-- Unknown IDL schema version (neither Anchor legacy nor a future supported schema) -> exit code `3` (refuse to analyse). M0 only supports legacy; M1 adds Anchor 2026 / Codama.
-- Conflicting discriminator override + algorithmic discriminator -> finding `R-DISC-OVERRIDE-CONFLICT` (M1).
-
-The exit-code contract is the user's guarantee that "clean report + exit 0" never silently hides "I did not understand your input."
+- A file in the tree that does not parse as Rust is **skipped**, not fatal —
+  guard extraction proceeds on the parseable files (a partial tree is normal
+  during refactors).
+- A path that does not exist, or a tree with no readable Rust, or an unknown
+  `--format` → exit `2` (invocation error).
+- There is **no exit code 3**. "Clean report + exit 0" never silently hides
+  "I did not understand your input": un-processable input is exit `2`.
 
 ---
 
 ## 4. Out-of-scope adversary capabilities
 
 Spectra is **not** designed to defend against, and makes **no** claim about:
-
-- Compiler bugs (LLVM / SBF backend miscompilation).
-- Validator-level consensus exploits.
-- Wallet UX phishing.
-- Off-chain governance / multisig signer compromise.
-- Frontend / client-side substitution attacks.
-- Token-2022 transfer-hook reentrancy (separate detector pack, listed in proposal's Future Expansion).
-
-These are explicitly named here so reviewers can verify Spectra is not over-claiming scope.
+compiler / SBF backend miscompilation; validator-level consensus exploits;
+wallet/UX phishing; off-chain governance / multisig signer compromise (the
+Drift attack class — see [STRIDE_GAP_ANALYSIS.md](STRIDE_GAP_ANALYSIS.md) §5);
+frontend / client substitution; logic / economic / oracle bugs that remove no
+account-validation guard. These are named explicitly so reviewers can verify
+Spectra is not over-claiming.
 
 ---
 
 ## 5. Cross-references
 
-- Severity classification rules per finding kind: [SEVERITY.md](SEVERITY.md)
-- Edge-case coverage matrix: [SOLANA_EDGE_CASES.md](SOLANA_EDGE_CASES.md)
-- False-positive mitigation strategy: [FALSE_POSITIVES.md](FALSE_POSITIVES.md)
-- Migration-awareness mechanism: [MIGRATION.md](MIGRATION.md)
+- Authoritative engineering spec: [`../TECHNICAL_SPEC.md`](../TECHNICAL_SPEC.md)
+- Severity per finding kind + exit-code contract: [SEVERITY.md](SEVERITY.md)
+- Explicit non-goals: [NON_GOALS.md](NON_GOALS.md)
+- Near-zero-FP-by-construction argument: [FALSE_POSITIVES.md](FALSE_POSITIVES.md)
+- Position vs the Foundation stack + Drift boundary: [STRIDE_GAP_ANALYSIS.md](STRIDE_GAP_ANALYSIS.md)

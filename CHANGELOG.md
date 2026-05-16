@@ -1,50 +1,77 @@
 # Changelog
 
-All notable changes to Spectra will be documented in this file.
+All notable changes to Spectra are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 from the first tagged release onward.
 
-The pre-1.0 line documents the M0 PoC milestones shipped before the
-Solana Foundation grant submission. Future tagged releases (`v0.2.0-m1`,
-`v0.3.0-m2`, etc.) will each get their own section here.
+The pre-1.0 line documents the M0 PoC milestones shipped before the Solana
+Foundation grant submission. Future tagged releases (`v0.3.0-m1`,
+`v0.4.0-m2`, …) each get their own section here.
 
 ## [Unreleased]
 
-### Added
-- `docs/STRIDE_GAP_ANALYSIS.md` — maps Spectra against the Solana Foundation's post-April-2026 security stack (STRIDE / SIRN / recommended free-ecosystem tools), showing the pre-merge / upgrade-time CI-gate position is unoccupied; §5 documents honestly why Spectra would **not** have detected the April 2026 Drift exploit (social-engineering / multisig / durable-nonce class, not an IDL-diff class). Linked from README documentation index and `docs/NON_GOALS.md`.
-- Inline Rustdoc on all public crate items in `spectra-core` (lib, idl, diff, discriminator, report). Enforced by `#![warn(missing_docs)]` + `RUSTFLAGS="-D warnings"` in CI.
-- `Dockerfile` + `.dockerignore` enabling hermetic containerised reproduction of the M0 acceptance gates; new `docker` CI job builds the image and runs the synthetic-regression + identical-IDL smoke tests on every push.
-- `SECURITY.md` vulnerability-reporting policy with supported-versions table and response SLAs (48 hr ack, 7 d triage, 30 d Critical/High fix).
-- `docs/TESTING.md` consolidated step-by-step testing guide covering host build, end-to-end CLI gates, Docker reproduction, real-world IDL reproduction, competitive benchmark, per-test mapping, and how-to-add-a-test.
-- `CODE_OF_CONDUCT.md` adopting Contributor Covenant 2.1.
-- `CHANGELOG.md` (this file) and `.github/ISSUE_TEMPLATE/` + `pull_request_template.md`.
-
 ### Changed
-- README cross-references updated to point at `SECURITY.md`, `Dockerfile`, `docs/TESTING.md`, and `CODE_OF_CONDUCT.md` now that they exist.
-- README "Need Identification" / "Similar Projects" rewritten: removed reliance on the closed 2024 program-verification RFP; reframed around the post-STRIDE lifecycle gap; added an explicit honest detection-boundary statement that Spectra would not have caught the Drift exploit (the Drift IDL pair is a correctness/perf fixture, not a prevention claim). `docs/NON_GOALS.md` gains a matching non-goal row.
+- **Total pivot to a strictly-differential account-validation
+  security-regression gate.** Spectra now parses two Anchor **source trees**
+  (a *baseline* = last released / on-chain-deployed version, and a
+  *candidate* = the upgrade PR) and emits a finding **only** when the
+  candidate removes, downgrades, or bypasses an account-validation guard the
+  baseline enforced. The prior IDL-diff scope (discriminator drift, Borsh
+  layout, account-field reorder) has been removed in full — it was not a
+  top-quantified Solana loss class and is a different problem; Spectra reads
+  Rust source, not IDL JSON.
+- Engine rewritten: `accounts.rs` (`syn`-based guard extractor with a
+  tolerant `#[account(...)]` token-walk parser), `regression.rs`
+  (strictly-differential differ with downgrade-vs-equivalent-pin logic),
+  `report.rs` (JSON / Markdown / SARIF 2.1.0).
+- Exit-code contract simplified to `0` clean / `1` BREAKING / `2` invocation
+  error. **Exit code 3 (refuse-to-analyse) removed** — un-processable input
+  is exit `2`; a file that does not parse as Rust is skipped, not fatal.
+- Finding set replaced with 9 account-validation kinds:
+  `signer_check_removed`, `type_cosplay_protection_removed`,
+  `owner_check_removed`, `has_one_constraint_removed`,
+  `custom_constraint_removed`, `pda_derivation_removed`,
+  `cpi_target_unpinned`, `validated_account_slot_removed` (BREAKING) +
+  `unvalidated_account_introduced` (warning).
+- Synthetic fixture replaced: `examples/vault_baseline` →
+  `examples/vault_candidate` (6 BREAKING + 1 warning, exit 1).
+- Test suite replaced with 6 integration tests including the
+  strictly-differential no-false-positive property (an unchanged context
+  inside an otherwise-changed program yields zero findings).
+- CI, `Dockerfile`, `spectra-action`, Python wrapper, `Makefile`, and
+  `scripts/record-demo.sh` migrated to `--baseline` / `--candidate` source
+  trees.
+- All engineering docs (`TECHNICAL_SPEC.md`, `docs/STRIDE_GAP_ANALYSIS.md`,
+  `docs/SEVERITY.md`, `docs/THREAT_MODEL.md`, `docs/ARCHITECTURE.md`,
+  `docs/NON_GOALS.md`, `docs/FALSE_POSITIVES.md`, `docs/CI_INTEGRATION.md`,
+  `docs/ROADMAP.md`, `docs/TESTING.md`) rewritten to the differential scope.
+- Positioning sharpened: Spectra is **complementary to** the
+  Foundation-recommended absolute scanners (Sec3 X-Ray, Auditware Radar,
+  l3x, Octane), silent by construction on already-missing checks, with
+  near-zero false positives by construction rather than by heuristic tuning.
 
-## [0.1.0-m0] — 2026-05-15
+### Removed
+- IDL-diff documentation that is no longer in scope (the prior real-world
+  Drift IDL benchmark and the generic-JSON-diff competitive benchmark — both
+  belonged to the dead IDL-diff scope).
 
-Pre-grant M0 PoC. Public at https://github.com/ayodyadsr/spectra.
+### Notes
+- Real-world detection / performance numbers are **not** asserted at M0:
+  `[NO PUBLIC DATA AVAILABLE]` until the explicit M1.5 benchmark against a
+  real public Anchor program's deployed-vs-upgrade source pair.
 
-### Added
-- Rust workspace: `spectra-core` library + `spectra` CLI binary; Python wrapper `spectra-cli`; GitHub Action scaffold `spectra-action`.
-- Anchor legacy-schema IDL diff engine covering 11 rule types: instruction added/removed/args-changed; account added/removed/field-added/field-removed/field-reordered/field-type-changed; **account-layout-changed-same-discriminator (silent corruption)**; **discriminator-collision**.
-- Output formats: JSON, Markdown, SARIF 2.1.0 (uploadable to GitHub Code Scanning via `github/codeql-action/upload-sarif@v3`).
-- Severity-tiered exit-code contract: `0` clean / `1` BREAKING / `2` invocation error / `3` refuse-to-analyse.
-- `--quiet` flag suppressing stdout on clean runs (CI noise control).
-- 8 green tests (2 unit + 6 integration) including the Anchor known-vector assertion `sha256("global:initialize")[..8] = afaf6d1f0d989bed`.
-- Synthetic-regression fixture (`examples/lending_v1.json` → `examples/lending_v2.json`) demonstrating all 11 rule kinds.
-- Real-world validation on Drift Protocol v2.155 → v2.162 (428 KB production IDL, 6 ms wall-clock, 6 findings including one real silent-corruption case on `PerpMarket`).
-- Head-to-head competitive benchmark against `diff -u` 3.10, `jd` 1.9.2, `dyff`, `json-diff` (npm) on the same Drift IDL pair.
-- 17+ engineering docs under `docs/` (architecture, severity, threat model, non-goals, edge-case matrix, FP policy, CI integration, rule engine, migration schema, Anchor specifics, adoption plan, roadmap, real-world + competitive benchmarks, Q1-style technical paper).
-- Asciinema demo cast committed at `demo.cast`.
-- CI workflow: `cargo fmt --check` + `cargo clippy -D warnings` + `cargo build --release` + `cargo test --release` + 5 end-to-end CLI gates verifying the exit-code contract.
+## [0.2.0-m0] — pre-grant M0 PoC
 
-### Changed
-- Relicensed from MIT to **Apache License 2.0** for the explicit patent grant in Apache §3, aligning with `solana-verifiable-build`, the Solana SDK, and Anza-published developer tooling.
+Public at https://github.com/ayodyadsr/spectra. Apache-2.0-licensed Rust
+workspace (`spectra-core` + `spectra` CLI), Python wrapper (`spectra-cli`),
+composite Action scaffold (`spectra-action`). Strictly-differential
+account-validation regression engine over Anchor `#[derive(Accounts)]`
+source; 9 finding kinds; JSON / Markdown / SARIF 2.1.0; exit `0`/`1`/`2`;
+6 integration tests; synthetic baseline → candidate fixture; green CI on
+every push (`fmt` + `clippy -D warnings` + build + test + end-to-end CLI
+gates + Docker smoke).
 
-[Unreleased]: https://github.com/ayodyadsr/spectra/compare/v0.1.0-m0...HEAD
-[0.1.0-m0]: https://github.com/ayodyadsr/spectra/releases/tag/v0.1.0-m0
+[Unreleased]: https://github.com/ayodyadsr/spectra/compare/v0.2.0-m0...HEAD
+[0.2.0-m0]: https://github.com/ayodyadsr/spectra/releases/tag/v0.2.0-m0

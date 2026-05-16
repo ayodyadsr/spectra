@@ -11,15 +11,31 @@ def main() -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    check = sub.add_parser("check", help="Diff two Anchor IDL JSON files")
-    check.add_argument("--old", required=True, help="Path to baseline (v_n) IDL JSON")
-    check.add_argument("--new", required=True, help="Path to new (v_{n+1}) IDL JSON")
+    check = sub.add_parser(
+        "check",
+        help="Diff a baseline program source tree against a candidate upgrade",
+    )
+    check.add_argument(
+        "--baseline",
+        required=True,
+        help="Path to the baseline (last released / on-chain) program source tree",
+    )
+    check.add_argument(
+        "--candidate",
+        required=True,
+        help="Path to the candidate (upgrade under review) program source tree",
+    )
     check.add_argument("--report", default=None, help="Optional path to write report")
     check.add_argument(
         "--format",
         default="json",
-        choices=["json", "markdown", "md"],
+        choices=["json", "markdown", "md", "sarif"],
         help="Output format",
+    )
+    check.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stdout on clean runs; exit code still signals status",
     )
 
     args = parser.parse_args()
@@ -36,12 +52,14 @@ def main() -> int:
     cmd = [
         binary,
         "check",
-        "--old", args.old,
-        "--new", args.new,
+        "--baseline", args.baseline,
+        "--candidate", args.candidate,
         "--format", args.format,
     ]
     if args.report:
         cmd.extend(["--report", args.report])
+    if args.quiet:
+        cmd.append("--quiet")
 
     return subprocess.call(cmd)
 

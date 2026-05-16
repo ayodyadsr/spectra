@@ -1,161 +1,163 @@
 # Architecture
 
-Spectra is a deterministic structural-compatibility analysis pipeline. This document describes the architecture as it exists today (M0) and as it is planned through M3.
+Spectra is a deterministic, strictly-differential account-validation
+regression pipeline. This document describes the architecture as it exists
+today (M0) and as it is planned through M3.
 
-Every component is labelled **deterministic** or **bounded heuristic**. Spectra has no network access, no clock, and no randomness; reproducibility is a property of the design, not a tested side-effect.
+Every component is **deterministic**. Spectra has no network access, no clock,
+and no randomness; reproducibility is a property of the design, not a tested
+side-effect.
 
 ---
 
 ## 1. M0 architecture (shipped)
 
 ```
-+----------------+      +---------------------+      +-----------------------+
-| Anchor legacy  | ---> | IDL parser          | ---> | Diff engine            |
-| IDL JSON       |      | (serde, deterministic)|     | - instruction diff     |
-| (--old, --new) |      +---------------------+      | - account diff         |
-+----------------+                                   | - discriminator hashing|
-                                                     | - silent-corruption    |
-                                                     | - discriminator coll.  |
-                                                     +-----------+-----------+
-                                                                 |
-                                                                 v
-                                                     +-----------+-----------+
-                                                     | Report                 |
-                                                     | (JSON or markdown)     |
-                                                     | + exit code            |
-                                                     +-----------------------+
++-------------------+     +----------------------+     +-------------------------+
+| baseline source   | --> | accounts.rs          | --> | regression.rs           |
+| tree (--baseline) |     | walk tree (walkdir)  |     | strictly-differential   |
++-------------------+     | parse Rust (syn)     |     | guard-set diff:         |
+                          | per-slot Guard set   |     |  baseline − candidate   |
++-------------------+     | from #[derive(       |     |  (downgrade-vs-pin      |
+| candidate source  | --> |   Accounts)]         |     |   logic)                |
+| tree (--candidate)|     +----------------------+     +-----------+-------------+
++-------------------+                                              |
+                                                                   v
+                                                       +-----------+-------------+
+                                                       | report.rs               |
+                                                       | JSON / Markdown /       |
+                                                       | SARIF 2.1.0  + exit code|
+                                                       +-------------------------+
 ```
 
-**Components:**
+**Components** (`spectra-core/src/`):
 
-- `spectra-core::idl` — Anchor legacy IDL parser. Pure structural deserialization via `serde_json`. **Deterministic.**
-- `spectra-core::discriminator` — `sha256("global:<name>")[..8]` and `sha256("account:<name>")[..8]`. Standalone, no Solana SDK dependency. Unit-tested against the canonical `initialize` vector. **Deterministic.**
-- `spectra-core::diff` — Computes the set of findings from `(old_idl, new_idl)`. Each finding kind is produced by a dedicated comparator. **Deterministic.**
-- `spectra-core::report` — Serialises findings to JSON or markdown. **Deterministic.**
-- `spectra-core::main` — CLI entrypoint (`spectra check ...`). **Deterministic.**
+- `accounts.rs` — walks each source tree with `walkdir`, parses every `.rs`
+  file with `syn` (recursing into `mod` blocks), and reduces each account slot
+  in every `#[derive(Accounts)]` struct to a typed `Guard` set. The
+  `#[account(...)]` parser is a tolerant `proc_macro2::TokenTree` walk that
+  handles bare keywords (`mut`, `signer`) mixed with `key = expr` pairs.
+  Files that do not parse as Rust are skipped, not fatal. **Deterministic.**
+- `regression.rs` — the strictly-differential differ. For every context in
+  *both* trees, emits a typed `Finding` only when a baseline guard is absent
+  from the candidate slot, applying the downgrade-vs-equivalent-pin rule.
+  **Deterministic.**
+- `report.rs` — renders Markdown and SARIF 2.1.0 (JSON is direct `serde_json`
+  in the CLI). Per-rule SARIF catalogue. **Deterministic.**
+- `main.rs` — `clap` CLI (`spectra check ...`); maps the report to exit
+  `0`/`1`/`2`. **Deterministic.**
 
-**Properties:**
-
-- No network calls.
-- No system clock reads.
-- No filesystem writes outside the optional `--report` path.
-- For a fixed `(old_idl_bytes, new_idl_bytes)` pair, the output bytes are identical across runs and across hosts.
+**Properties:** no network; no clock; no randomness; no filesystem writes
+outside the optional `--report` path. For a fixed `(baseline, candidate)`
+pair the output bytes and the ordered finding list are identical across runs
+and hosts.
 
 ---
 
 ## 2. M1 architecture (pending grant)
 
-M1 adds schema breadth (Anchor 2026 / Codama, Shank native IDL) and richer comparators (defined types, events, errors). The pipeline shape is unchanged; the parser and the rule set expand.
+M1 adds the **native-program guard path** without changing the pipeline
+shape: a second extractor that recognises manual `is_signer` / `owner ==` /
+`key ==` checks in instruction bodies, plus defined-constraint resolution
+(`constraint =` referencing helper fns/consts resolved instead of opaque-
+stringified). The differ and renderers are unchanged.
 
 ```
         +-------------------+
-        | Anchor legacy     |
+        | source tree       |
         +---------+---------+
                   |
         +---------v---------+
-+-------+ Schema dispatcher  +-------+
-| Anchor 2026 (Codama)      | Shank |
-+---------+--------+--------+-------+
-          |        |        |
-          v        v        v
-        +---+    +---+    +---+
-        | normalised internal IDL |
-        +-----+-------------------+
-              |
-              v
-        +-----+-----+
-        | Diff engine (rule registry)
-        | - all M0 rules
-        | - event / error / defined-type
-        | - enum variant insert/remove
-        | - explicit-disc override conflict
-        +-----+-----+
-              |
-              v
-           Report
+        | extractor dispatch |
+        +----+---------+-----+
+             |         |
+   #[derive(Accounts)] |  manual native checks (syn-AST flow)
+             |         |
+             v         v
+        +----+---------+----+
+        | normalised Guard sets |
+        +----------+------------+
+                   |
+                   v
+        +----------+------------+
+        | regression.rs (unchanged differ) |
+        +----------+------------+
+                   v
+                Report
 ```
 
-**New components:**
-
-- `spectra-core::idl::dispatcher` — picks parser by schema marker. Returns the normalised internal IDL.
-- `spectra-core::idl::anchor_2026` — Codama-aligned parser.
-- `spectra-core::idl::shank` — native-program IDL parser.
-- `spectra-core::diff::rules` — refactored as a `Rule` trait + `RuleRegistry` (see [RULE_ENGINE.md](RULE_ENGINE.md)).
-- `spectra-core::loader` — Loader v3 vs v4 program-data-account format adapter (gated by Loader v4 mainnet activation; budget includes contingency).
+Also in M1: `thiserror`-based `SpectraError` (library crates move off
+`anyhow`) so audit firms can `match` on error variants; `cargo-semver-checks`
+gates public-API stability. **M1.5** delivers the real-world validation
+benchmark against a public Anchor program's deployed-vs-upgrade source pair.
 
 ---
 
 ## 3. M2 architecture (pending grant)
 
-M2 introduces **bounded execution** via `litesvm`. This is the only component in Spectra that runs code; it is fenced, deterministic-per-input, and bounded.
+M2 introduces **bounded execution** via `litesvm` — the only component that
+runs code; fenced, deterministic-per-input, and bounded.
 
 ```
 +-----------------+      +-----------------+
-| --old program   |      | --new program   |
-| .so + IDL       |      | .so + IDL       |
+| baseline build  |      | candidate build |
 +--------+--------+      +--------+--------+
          |                        |
          v                        v
-+--------+--------+      +--------+--------+
-| litesvm runner  |      | litesvm runner  |
-| - load program  |      | - load program  |
-| - seed accounts |      | - seed accounts |
-| - replay corpus |      | - replay corpus |
-| (<= 50 tx)      |      | (<= 50 tx)      |
-+--------+--------+      +--------+--------+
+   litesvm runner           litesvm runner
+   - load program           - load program
+   - seed accounts          - seed accounts
+   - replay corpus (<=50 tx)- replay corpus (<=50 tx)
          |                        |
          +-----------+------------+
                      v
-            +--------+--------+
-            | Replay diff     |
-            | - deserialize OK?
-            | - log shape     |
-            | - CPI signatures|
-            +--------+--------+
+            guard-regression replay diff
+            - AccountNotInitialized?
+            - signer-missing?
+            - per-tx delta
                      v
                   Findings
 ```
 
-**Bounds (explicitly enforced):**
-
-- ≤ 50 transactions per pilot.
-- ≤ 60 seconds end-to-end in a GitHub Actions free-tier runner.
-- No mainnet snapshot fetch. No archive RPC during CI runtime. The corpus is hand-curated; see [CORPUS.md](CORPUS.md).
-- An Archive-RPC budget line exists, but **only** for one-time corpus authoring at pilot onboarding — not for CI runtime.
-
-These bounds are why M2 is feasible on a free-tier runner and why it is not "mainnet replay."
+**Bounds (enforced):** ≤50 transactions per pilot; ≤60 s end-to-end in a
+free-tier GitHub Actions runner; no mainnet snapshot fetch and no archive RPC
+during CI runtime — the corpus is hand-curated. The Archive-RPC budget line
+funds **one-time** corpus authoring at pilot onboarding, not CI runtime.
+These bounds are why M2 is feasible on a free-tier runner and why it is
+**not** "mainnet replay."
 
 ---
 
 ## 4. M3 architecture (pending grant)
 
-M3 adds the **suppression file** and the **packaged GitHub Action**.
-
-- `spectra-allow.toml` — declarative suppression with required `rationale`, `expires`, and `upgrade_pr` fields. See [FALSE_POSITIVES.md](FALSE_POSITIVES.md) and [MIGRATION.md](MIGRATION.md).
-- `spectra-action` — composite GitHub Action that runs `spectra check`, posts the markdown report as a PR comment, and uploads the JSON report as a build artifact.
+- `spectra-allow.toml` — declarative per-finding suppression with mandatory
+  `rationale`, `expires`, `upgrade_pr`. An expired suppression fails CI — no
+  silent waivers. See [FALSE_POSITIVES.md](FALSE_POSITIVES.md).
+- `spectra-action` — composite GitHub Action published to the Marketplace;
+  runs `spectra check`, uploads SARIF via
+  `github/codeql-action/upload-sarif@v3`, and maintains a single
+  updated-in-place PR comment. Spectra's own CI dogfoods the published Action
+  as its smoke gate.
 
 ---
 
 ## 5. Determinism guarantees
 
 | Component | Property | How enforced |
-|-----------|----------|--------------|
-| IDL parser | Same bytes -> same internal IDL | `serde_json` deterministic; field order preserved |
-| Diff engine | Same IDL pair -> same finding set | Pure functions, sorted iteration |
-| Discriminator | Same name -> same 8 bytes | SHA-256 (`sha2` crate) on `"global:" + name` / `"account:" + name` |
-| Report | Same findings -> same bytes | Stable sort, fixed serialisation |
-| CI | Identical IDL -> exit 0 | CI step `Identical-IDL exit-0 check` |
+|---|---|---|
+| `accounts.rs` parser | Same source bytes → same Guard sets | `syn` deterministic; source-order slot iteration |
+| `regression.rs` differ | Same pair → same ordered finding list | Pure functions, context-then-slot order |
+| `report.rs` | Same findings → same bytes | Fixed serialisation, stable order |
+| CLI | Identical trees → exit 0 | CI step "identical-tree exit-0" + integration test |
 
-No component reads from the network, the system clock, or `/dev/urandom`.
+No component reads the network, the system clock, or `/dev/urandom`.
 
 ---
 
-## 6. What is explicitly NOT in the architecture
+## 6. Explicitly NOT in the architecture
 
-- No LLM, no ML, no statistical heuristic, no fuzz-derived signature.
-- No symbolic execution.
-- No SMT solver.
-- No formal-verification claim.
-- No runtime monitoring.
-
-If a future Spectra component requires any of the above, it will be introduced behind an explicit subcommand and labelled **bounded heuristic** in this document.
+No LLM / ML / statistical heuristic; no IDL parsing (Spectra reads Rust
+source, not IDL JSON); no symbolic execution; no SMT solver; no
+formal-verification claim; no runtime monitoring; no absolute-scan pass. If a
+future component ever requires a heuristic, it ships behind an explicit
+subcommand and is labelled as such here.

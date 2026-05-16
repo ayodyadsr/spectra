@@ -28,17 +28,17 @@ fixture, list the before/after below. If it does not, write "None".
 
 | Fixture | Old finding count / exit | New finding count / exit |
 |---|---|---|
-| `examples/lending_v1.json` → `examples/lending_v2.json` |  |  |
-| Drift v2.155 → v2.162 (if applicable) |  |  |
+| `examples/vault_baseline` → `examples/vault_candidate` |  |  |
+| Identical-tree invariant (`--baseline X --candidate X`) |  |  |
 
 ## Test plan
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo test --release --workspace` (all 8 tests still pass)
-- [ ] New rule? Added a golden-file integration test under `spectra-core/tests/`
+- [ ] `cargo test --release --workspace` (all 6 integration tests still pass)
+- [ ] New rule? Added a baseline/candidate fixture pair + golden integration test under `spectra-core/tests/`
 - [ ] New rule? Added rule ID + severity row in [`docs/SEVERITY.md`](../docs/SEVERITY.md)
-- [ ] New rule? Added edge-case row in [`docs/SOLANA_EDGE_CASES.md`](../docs/SOLANA_EDGE_CASES.md)
+- [ ] New rule? Updated the boundary statement in [`docs/NON_GOALS.md`](../docs/NON_GOALS.md) if it narrows a documented non-goal
 - [ ] Docs updated where relevant (README, TESTING, CHANGELOG `[Unreleased]`)
 
 ## Related issues
@@ -49,5 +49,5 @@ fixture, list the before/after below. If it does not, write "None".
 
 <!--
 Anything you want reviewers to focus on — tricky invariants, areas you
-are unsure about, false-positive risk on real-world IDLs, etc.
+are unsure about, false-positive risk on real-world source trees, etc.
 -->

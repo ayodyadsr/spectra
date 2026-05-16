@@ -1,90 +1,94 @@
-# Severity Classification Rules
+# Severity Classification & Exit-Code Contract
 
-Spectra assigns a fixed severity to every finding kind. Severities are deterministic — they are a property of the finding kind, not of context or heuristics. The CLI's exit code is derived from the maximum severity present in the report.
+Spectra assigns a fixed severity to every finding kind. Severity is a property
+of the finding kind, not of context or heuristics. The CLI's exit code is
+derived from whether any BREAKING finding is present.
 
-This document is the canonical rule table. Any change to a rule's severity is a breaking change to Spectra's contract and must be released in a major version bump.
+This document is the canonical rule table. Any change to a rule's severity is
+a breaking change to Spectra's contract and ships only in a major version
+bump. Rule IDs here match the `kind` field in JSON/SARIF and the SARIF rule
+catalogue emitted by `spectra-core/src/report.rs`.
 
 ---
 
 ## 1. Severity levels
 
-| Level | Meaning | Exit code contribution |
-|-------|---------|------------------------|
-| BREAKING | The upgrade is incompatible with at least one existing on-chain state or client invocation pattern. Default action: block merge. | `1` |
-| warning | The upgrade is forward-compatible at the schema level but introduces a downstream consideration (storage resize, indexer update, etc.). Default action: surface in PR. | `0` |
-| informational | A change exists but cannot break compatibility (e.g. doc-only IDL field). | `0` |
+| Level | Meaning | Exit-code contribution |
+|---|---|---|
+| BREAKING | The upgrade removes, downgrades, or bypasses an account-validation guard the deployed baseline enforced. Default action: **block the merge.** | drives exit `1` |
+| warning | New attack surface introduced (a brand-new unvalidated slot), but no existing guarantee was removed. Default action: surface in the PR. | exit unaffected (`0`) |
 
-Severities are not configurable in M0. M3 introduces `spectra-allow.toml` for **per-finding suppression with rationale**, not for global severity downgrade.
-
----
-
-## 2. Rule table (M0)
-
-Every rule has a stable ID. Rule IDs are referenced from finding output and from suppression entries.
-
-| ID | Finding kind | Severity | Why |
-|----|--------------|----------|-----|
-| R-INS-REM | `instruction_removed` | BREAKING | Old clients hit `InstructionFallbackNotFound`. |
-| R-INS-ARG | `instruction_args_changed` | BREAKING | Borsh arg layout mismatch -> corrupt deserialize. |
-| R-INS-ADD | `instruction_added` | warning | Informational. |
-| R-ACC-REM | `account_removed` | BREAKING | Old account discriminator no longer accepted. |
-| R-ACC-ADD | `account_added` | warning | Informational. |
-| R-ACC-FIELD-REM | `account_field_removed` | BREAKING | Borsh layout shifts. |
-| R-ACC-FIELD-ADD | `account_field_added` | warning | Informational; protocol must verify `realloc` + rent. |
-| R-ACC-FIELD-REORDER | `account_field_reordered` | BREAKING | Borsh layout reorder corrupts existing accounts. |
-| R-ACC-FIELD-TYPE | `account_field_type_changed` | BREAKING | Width/encoding change corrupts existing accounts. |
-| R-ACC-SILENT-CORRUPT | `account_layout_changed_same_discriminator` | BREAKING | The discriminator-stable / layout-changed case — runtime accepts old bytes into new layout. |
-| R-DISC-COLL | `discriminator_collision` | BREAKING | Two IDL names share the truncated 8-byte SHA-256. |
+Severity is **not configurable** at M0. M3 introduces `spectra-allow.toml`
+for per-finding suppression with a mandatory rationale — not for global
+severity downgrade.
 
 ---
 
-## 3. Rule table (M1 — pending grant)
+## 2. Rule table (M0 — exhaustive, 9 kinds)
 
-These rules are designed and reserved; they activate when the M1 schema parsers ship.
+Every rule maps 1:1 to a `Finding` variant in
+`spectra-core/src/regression.rs`. A finding fires **only** when the guard is
+present in the baseline slot and absent from the candidate slot (and, for the
+pinned-kinds, no equivalent pin remains — see §3).
 
-| ID | Finding kind | Severity | Trigger |
-|----|--------------|----------|---------|
-| R-EVENT-REM | `event_removed` | BREAKING | Indexers and subscribers break. |
-| R-EVENT-FIELD-REORDER | `event_field_reordered` | BREAKING | Off-chain event consumers decode wrong fields. |
-| R-EVENT-FIELD-TYPE | `event_field_type_changed` | BREAKING | Off-chain decode mismatch. |
-| R-ERROR-CODE-CHANGED | `error_code_changed` | BREAKING | Client error-handling branches break. |
-| R-ENUM-VAR-INSERT | `enum_variant_inserted` | BREAKING | Borsh enum tag is positional; insertion mid-list renumbers all subsequent variants. |
-| R-ENUM-VAR-REM | `enum_variant_removed` | BREAKING | As above + the removed tag becomes an unknown variant. |
-| R-DEFINED-TYPE-CHANGED | `defined_type_layout_changed` | BREAKING | Shared struct used across instructions / accounts. |
-| R-DISC-OVERRIDE-CONFLICT | `discriminator_override_conflicts_algorithm` | BREAKING | Anchor 0.30+ explicit discriminator override does not match the algorithmic one — silent foot-gun. |
-| R-IDL-SCHEMA-UNKNOWN | `idl_schema_unsupported` | refuse (exit 3) | IDL schema version is not legacy / Anchor 2026 / Shank. |
+| Rule ID (`kind`) | Severity | Fires when |
+|---|---|---|
+| `signer_check_removed` | BREAKING | Baseline required this slot to sign; the candidate no longer does. Canonical missing-signer-check bug introduced on upgrade. |
+| `type_cosplay_protection_removed` | BREAKING | A typed Anchor wrapper (`Account<T>` / `AccountLoader<T>` / `InterfaceAccount<T>`) enforcing owner + 8-byte discriminator was downgraded to `UncheckedAccount` / `AccountInfo` with no equivalent pin remaining. |
+| `owner_check_removed` | BREAKING | `#[account(owner = …)]` / `#[account(address = …)]` pin dropped with no equivalent pin remaining. |
+| `has_one_constraint_removed` | BREAKING | `#[account(has_one = …)]` relational-integrity check dropped. |
+| `custom_constraint_removed` | BREAKING | `#[account(constraint = …)]` predicate dropped. |
+| `pda_derivation_removed` | BREAKING | `#[account(seeds = […], bump)]` PDA derivation dropped — an arbitrary account is now accepted in this slot. |
+| `cpi_target_unpinned` | BREAKING | A pinned CPI target program id (`Program<'info, T>` / `address` pin) downgraded to an unvalidated account — arbitrary-program-invocation hazard. |
+| `validated_account_slot_removed` | BREAKING | A slot carrying ≥1 guard in the baseline context was removed while the context itself still exists (the instruction no longer takes — and therefore no longer checks — it). |
+| `unvalidated_account_introduced` | warning | The candidate adds a brand-new `UncheckedAccount` / `AccountInfo` slot absent from the baseline. New attack surface to review — **not** a regression of an existing guarantee. |
 
----
-
-## 4. Rule table (M2 — pending grant)
-
-M2 introduces `litesvm`-based bounded execution. New rule classes:
-
-| ID | Finding kind | Severity | Trigger |
-|----|--------------|----------|---------|
-| R-REPLAY-DESERIALIZE-FAIL | `corpus_tx_deserialize_failure_after_upgrade` | BREAKING | A canned pre-upgrade-valid transaction fails to deserialize against the post-upgrade program. |
-| R-REPLAY-LOG-DIVERGENCE | `corpus_tx_log_diverged` | warning | The transaction succeeds but emits a different log shape. |
-| R-REPLAY-CPI-FAIL | `corpus_tx_cpi_signature_mismatch` | BREAKING | A CPI signature the program previously emitted is no longer valid. |
-
-M2 rules are **bounded** — they apply only to the ≤50-tx per-pilot transaction corpus described in [CORPUS.md](CORPUS.md). They are explicitly **not** "we replay mainnet."
+There is no informational tier and no M1/M2 reserved-rule table — new finding
+kinds, if added, ship in a minor version with a doc entry and CI evidence,
+not as pre-declared placeholders.
 
 ---
 
-## 5. Exit-code contract
+## 3. Downgrade-vs-equivalent-pin rule
+
+For `type_cosplay_protection_removed`, `owner_check_removed`, and
+`cpi_target_unpinned`, the finding fires **only if no equivalent pin remains**
+in the candidate slot:
+
+- `Account<'info, Mint>` → `#[account(owner = token::ID)] UncheckedAccount`
+  — **no finding** (owner still pinned, re-expressed).
+- `Account<'info, Mint>` → `UncheckedAccount` (no pin) —
+  `type_cosplay_protection_removed`.
+- `Program<'info, Token>` → `#[account(address = token::ID)] AccountInfo` —
+  **no finding**. `Program<'info, Token>` → `UncheckedAccount` —
+  `cpi_target_unpinned`.
+
+This is the core mechanism that keeps the false-positive rate near-zero: a
+re-expressed-but-still-enforced guard is not a removed guarantee. See
+[FALSE_POSITIVES.md](FALSE_POSITIVES.md).
+
+---
+
+## 4. Exit-code contract
 
 | Exit code | Meaning |
-|-----------|---------|
-| `0` | Analysis completed; no BREAKING findings. |
-| `1` | Analysis completed; at least one BREAKING finding. |
-| `2` | Invocation error (bad path, JSON parse failure, unknown CLI flag). |
-| `3` | Refuse to analyse — the input is recognised as something Spectra cannot soundly diff (e.g. unsupported IDL schema version). |
+|---|---|
+| `0` | Analysis completed; **no BREAKING finding**. Warnings may be present. Clean / mergeable. |
+| `1` | Analysis completed; **≥1 BREAKING finding**. The upgrade removes a guarantee — block the merge. |
+| `2` | Invocation error: bad path, unparseable input tree, or unknown `--format`. |
 
-Exit `0` on identical IDLs is a tested invariant — see the `no_false_collision_on_synthetic_fixture` integration test and the CI step "Identical-IDL exit-0 check."
-
-A clean report at exit `0` is **never** silent failure: anything Spectra cannot understand goes to exit `2` or `3`.
+**There is no exit code 3.** A clean report at exit `0` is never a silent
+failure: anything Spectra cannot process surfaces as exit `2`. Exit `0` on
+identical input trees (`--baseline X --candidate X`) is a tested invariant —
+see the strictly-differential no-false-positive integration test and the CI
+"identical-tree exit-0" step.
 
 ---
 
-## 6. Stability promise
+## 5. Stability promise
 
-Rule IDs are stable. The mapping `rule_id -> severity` is stable within a major version. New rule IDs may be added in minor versions. Severity downgrades require a major version bump and a documented migration note.
+Rule IDs are stable. The mapping `rule_id → severity` is stable within a major
+version. New rule IDs may be added in minor versions. Any severity downgrade
+requires a major version bump and a documented migration note. The exit-code
+contract (`0`/`1`/`2`, no `3`) is part of the public interface and is
+covered by `cargo-semver-checks` from M1.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Record an asciinema cast of the Spectra synthetic-regression demo.
+# Record an asciinema cast of the Spectra account-validation regression demo.
 # Output: demo.cast (uploadable via `asciinema upload demo.cast`).
 set -euo pipefail
 
@@ -19,14 +19,14 @@ cargo build --release
 
 cat <<'EOF'
 About to record. The demo runs:
-  spectra check --old examples/lending_v1.json --new examples/lending_v2.json --format markdown
+  spectra check --baseline examples/vault_baseline --candidate examples/vault_candidate --format markdown
 
 When recording starts, just wait for the command to finish, then press Ctrl+D.
 EOF
 
 asciinema rec demo.cast \
-  --title "Spectra M0 PoC — Solana program upgrade diff" \
-  --command "./target/release/spectra check --old examples/lending_v1.json --new examples/lending_v2.json --format markdown"
+  --title "Spectra M0 PoC — Solana account-validation regression gate" \
+  --command "./target/release/spectra check --baseline examples/vault_baseline --candidate examples/vault_candidate --format markdown"
 
 echo
 echo "Recorded to demo.cast"

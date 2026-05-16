@@ -7,73 +7,65 @@
 
 ## Project Overview
 
-**Tagline:** A CI-time behavioural-regression diff for Solana program upgrades — catches the silent-corruption and discriminator-collision cases that general-purpose JSON diff tools cannot see.
+**Tagline:** A CI-time, strictly-differential account-validation security-regression gate for Solana program upgrades — it fires only when an upgrade *removes or weakens* an account-validation guard the already-deployed version enforced.
 
 **Project Description:**
-Spectra is an open-source CLI and GitHub Action that diffs two versions of a Solana program at the Anchor IDL level and reports the upgrade hazards that would silently corrupt existing on-chain state or misroute existing client calls. It runs in roughly **6 milliseconds** on a 428 KB production IDL, emits machine-readable JSON, human-readable Markdown, or SARIF 2.1.0 (uploaded straight to GitHub's Security tab), and gates a CI build with a severity-tiered exit code. Every claim in this README is reproducible from the commit it points to.
+Spectra is an open-source CLI and GitHub Action that parses two Anchor program source trees — a **baseline** (the last released / on-chain-deployed version) and a **candidate** (the upgrade PR under review) — extracts the per-account-slot security-guard set Anchor enforces for each `#[derive(Accounts)]` context, and reports a finding **only** when the candidate drops, downgrades, or bypasses a guard the baseline enforced. It emits machine-readable JSON, human-readable Markdown, or SARIF 2.1.0 (uploaded straight to GitHub's Security tab), and gates a CI build with a severity-tiered exit code. Every claim in this README is reproducible from this repository.
 
 **Problem Statement:**
 
-Solana program teams shipping upgrades into production face three concrete problems that no public tool currently fills end-to-end:
+Access-control / account-validation failures are the single largest quantified loss class in the Solana ecosystem. The canonical bugs — a missing signer check, a missing owner / discriminator check (type cosplay), an unpinned CPI target, a dropped `has_one` / PDA-seeds / custom constraint — are well understood, and absolute scanners (Sec3 X-Ray, Auditware Radar, l3x, Octane) already hunt for them in a single snapshot. But there is a structural gap none of those tools fills:
 
-1. **Silent on-chain data corruption on upgrade.** The Solana BPF Loader does not validate that the new program is compatible with on-chain accounts already deserialised by the old program. A reordered field, a `u64 → u128` widening, or a padding-byte-to-config-byte conversion deserialises against the new layout without error — data on chain becomes wrong. The closest layer (audit-firm formal verification) costs $15k–$100k per engagement and only covers a single revision.
-2. **Discriminator collisions are not statically checked.** Anchor and Shank both derive 8-byte instruction tags from `sha256("global:<name>")[..8]`. Two human-chosen names colliding in 8-byte truncated SHA-256 space is a real practical risk, and a colliding pair silently misroutes calls between instructions. No existing diff tool computes discriminators.
-3. **No CI-gateable upgrade-safety regression check exists in public tooling.** `solana-verifiable-build` answers "does the deployed bytecode match source?" (build provenance — a different layer). `diff -u` / `jd` / `dyff` / `json-diff` either trip on harmless reformat or block every additive change, and none knows what an Anchor discriminator is. Audit-firm formal verification is the next layer up by cost and scope. The middle layer — "did this upgrade preserve old users' data and old clients' calls?" — is open, and is named directly in the Solana Foundation's open RFP [Program Verification Tooling](https://forum.solana.com/t/program-verification-tooling/1032).
+1. **A guard that was *present* in the deployed version and *removed* on upgrade is invisible to a snapshot scanner.** An absolute scanner asks "is there a missing owner check *anywhere* in this code?" — it has no notion of "the previous version", so a guard silently deleted in an upgrade PR does not register as a *regression*; at best it competes with every other absolute finding and its heuristic false-positive budget.
+2. **Absolute scanners must tune heuristics to keep false positives down.** A regression gate that only ever compares against the deployed baseline has a false-positive rate that is near-zero *by construction*, not by tuning: identical input yields zero findings, and a finding can only mean "this PR took away a guarantee the deployed program already gave its users."
+3. **No public Solana tool gates an upgrade PR on account-validation *regression* specifically.** Build-provenance tools (`solana-verifiable-build` / `anchor verify`) answer a different question; the Foundation's STRIDE / SIRN stack is post-deployment; absolute scanners are stateless. The differential-regression layer is open.
 
 **Solana Integration:**
-Solana programs are almost always deployed via an *upgradeable* BPF loader. The loader does not check that the new program is compatible with the old program's on-chain accounts. Two classes of upgrade hazard therefore exist on Solana that do not exist on most other L1s:
-
-1. **Account-layout silent corruption.** The 8-byte Anchor discriminator stays the same, but the field layout has changed. The runtime accepts old account data and deserialises it into the new shape, with no error. A reordered field is now read as a different field. Money on paper becomes wrong money on chain.
-2. **Discriminator collision.** Anchor and Shank both derive 8-byte instruction tags from `sha256("global:<name>")[..8]`. Two different names collide in 8-byte truncated SHA-256 space at far higher probability than the 64-bit birthday bound suggests once you allow human-chosen names. A colliding pair silently misroutes calls between instructions.
-
-Spectra targets exactly these two Solana-specific hazards, plus 9 other rules covering the conventional shape-of-the-interface changes that break old clients.
+Solana programs are almost always deployed via an *upgradeable* loader. Anchor's `#[derive(Accounts)]` context structs are the declarative place where account-validation guards live: `Signer<'info>`, typed wrappers (`Account<'info, T>` / `AccountLoader` / `InterfaceAccount`) that enforce the owner + 8-byte discriminator check, `Program<'info, T>` CPI-target pins, and `#[account(...)]` attributes (`signer`, `has_one`, `owner`, `address`, `seeds`/`bump`, `constraint`). Downgrading a typed slot to `UncheckedAccount` / `AccountInfo`, or deleting a constraint attribute, silently removes a runtime security check with no compiler error. Spectra models exactly this guard set per slot and diffs it across versions.
 
 **Founder Interest:**
-The applicant has 20+ years in offensive security (most recently Red Team lead at Indonesia's largest commercial bank by assets) and built numerous CI-time security gates for production engineering teams. The dominant pattern in audit findings on Solana programs is *not* the kind of arithmetic bug fuzzers find — it is shape mismatches between the deployed program and the data already on chain. Spectra is the smallest tool that closes that gap, and the gap was named directly in the open [Solana forum RFP "Program Verification Tooling"](https://forum.solana.com/t/program-verification-tooling/1032).
+The applicant has 20+ years in offensive security — most recently Red Team lead at Indonesia's largest commercial bank by assets (a top-tier Southeast Asian financial institution serving tens of millions of users) — and has built CI-time security gates and detection signatures for production engineering teams. The strictly-differential framing (compare against the deployed baseline; near-zero false positives by construction) is a detection-engineering pattern, not a generic-static-analysis one, and it is the position no existing free Solana scanner occupies.
 
 **Expected Impact:**
 
-Concrete, verifiable outcomes the project delivers (each maps to evidence already in this repo):
+Concrete, verifiable outcomes (each maps to evidence in this repo):
 
-1. **Pre-deploy detection of silent on-chain corruption.** Verified end-to-end on the Drift Protocol v2.155 → v2.162 upgrade pair: Spectra surfaced the real `PerpMarket` padding-to-config conversion in 6 ms, where a 393-line `diff -u` would have required a 7-step Anchor + Borsh inference chain by a human reviewer. Evidence: [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md).
-2. **CI-gateable severity contract that integrates with existing GitHub Security tooling.** SARIF 2.1.0 output uploads to GitHub Code Scanning via the standard `github/codeql-action/upload-sarif@v3` action — same surface as CodeQL — with a 4-level exit-code contract (`0`/`1`/`2`/`3`) verified by 3 dedicated CI steps. Evidence: [`docs/SEVERITY.md`](docs/SEVERITY.md), [`docs/CI_INTEGRATION.md`](docs/CI_INTEGRATION.md).
-3. **Fills the named gap between build-provenance verification and audit-firm formal verification.** The Solana Foundation RFP explicitly identifies upgrade-safety regression as a missing layer. Spectra is the smallest credible filling: a single-binary CLI, ~6 ms on a 428 KB production IDL, ~1.5× the wall-clock of `diff -u` while doing dramatically more useful work. Evidence: [forum.solana.com RFP](https://forum.solana.com/t/program-verification-tooling/1032) + [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md).
-4. **Reproducibility-by-construction.** Every claim in this README points back to a commit hash and a CI run URL on https://github.com/ayodyadsr/spectra. Identical-IDL-input emits zero findings, verified by both a test and a CI step against a 428 KB production input — i.e. the false-positive floor is established on real data, not synthesised. Evidence: CI run [25924418961](https://github.com/ayodyadsr/spectra/actions/runs/25924418961).
+1. **Pre-deploy detection of account-validation *regressions*.** The bundled synthetic baseline → candidate Anchor fixture pair drops five distinct guards on one instruction and adds a brand-new unvalidated account slot; Spectra reports 6 BREAKING + 1 warning and exits `1`. An unchanged context in the same changed program yields zero findings. Evidence: [`examples/`](examples/), [`spectra-core/tests/integration_test.rs`](spectra-core/tests/integration_test.rs).
+2. **Near-zero false positives by construction.** Identical input (same tree as baseline and candidate) yields zero findings and exit `0` — asserted by a test and a dedicated CI step. This is the structural property, not a tuned heuristic.
+3. **CI-gateable severity contract that integrates with existing GitHub Security tooling.** SARIF 2.1.0 output uploads to GitHub Code Scanning via the standard `github/codeql-action/upload-sarif@v3` action — same surface as CodeQL — with a 3-level exit-code contract (`0`/`1`/`2`) verified by dedicated CI steps. Evidence: [`docs/SEVERITY.md`](docs/SEVERITY.md), [`docs/CI_INTEGRATION.md`](docs/CI_INTEGRATION.md).
+4. **Complementary to — not a re-implementation of — absolute scanners.** Spectra stays silent on a missing check that was *already missing in the baseline* (that is the absolute scanners' job, by construction not a regression). It fires only on a removed guarantee. Evidence: [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md).
 
 ### Project Details
 
 **Technology Stack:**
-- **Rust 2021 edition** — core engine ([`spectra-core`](spectra-core)), `serde_json` for IDL parsing, `sha2` for discriminator computation, `clap 4` for the CLI.
+- **Rust 2021 edition** — core engine ([`spectra-core`](spectra-core)): `syn` 2 (full + extra-traits) and `proc-macro2` for parsing Anchor source, `walkdir` for tree traversal, `serde` / `serde_json` for report serialisation, `clap` 4 for the CLI.
 - **Python 3.9+ wrapper** — [`spectra-cli`](spectra-cli), subprocess-invokes the Rust binary so the same engine is reachable from Python-first CI environments.
-- **GitHub Action scaffold** — [`spectra-action`](spectra-action), composite action stub; full Marketplace publish lands in M3.
+- **GitHub Action scaffold** — [`spectra-action`](spectra-action), composite action; full Marketplace publish lands in M3.
 - **SARIF 2.1.0** — output format for GitHub Code Scanning, consumed by `github/codeql-action/upload-sarif@v3`.
-- **litesvm** (M2 only) — bounded, in-process Solana VM for per-pilot replay of ≤50 hand-curated transactions; not a mainnet snapshot.
 
 **Core Architecture:**
-The engine is intentionally narrow and deterministic. Five modules:
+The engine is intentionally narrow and deterministic. Three modules:
 
-- `idl` — parses Anchor legacy-schema IDL JSON; M1 adds Anchor 2026 / Codama and Shank native schemas behind the same `Idl::from_path` entry point with schema auto-detection.
-- `discriminator` — computes `sha256("global:<name>")[..8]` for instructions and `sha256("account:<name>")[..8]` for accounts. The Anchor known-vector `sha256("global:initialize")[..8] = afaf6d1f0d989bed` is asserted in a unit test.
-- `diff` — pairwise comparison of two parsed IDLs, emitting `Finding`s typed by 11 rule kinds (see [§All M0 rules](#all-11-things-spectra-checks-today-m0)).
-- `report` — renders findings as JSON, Markdown, or SARIF 2.1.0. SARIF maps `BREAKING → level: error`, `warning → level: warning`, with per-finding `logicalLocation`.
-- `main` — CLI entry point. Severity-tiered process-level exit code per [`docs/SEVERITY.md`](docs/SEVERITY.md) §5.
+- `accounts` — walks a program source tree, finds every `#[derive(Accounts)]` struct (recursing into `mod` blocks), and reduces each account slot to the set of security `Guard`s Anchor enforces for it: `Signer`, `Typed(T)` (owner + discriminator / type-cosplay), `Owner`, `Address`, `HasOne`, `Seeds`, `Constraint`, `ProgramId`. Files that fail to parse as Rust are skipped, not fatal. Guard sets are `BTreeSet`s so the model is deterministic.
+- `regression` — strictly-differential differ. For each context present in *both* versions, for each guard present in the baseline slot and absent from the candidate slot, it emits a typed `Finding`. Downgrade rules require that *no* equivalent pin remains (e.g. `Typed → Owner` is not a regression; `Typed → UncheckedAccount` is).
+- `report` — renders findings as JSON, Markdown, or SARIF 2.1.0. SARIF maps `Breaking → level: error`, `Warning → level: warning`, with a per-rule rule catalogue.
 
 **CLI Specification:**
 ```text
-spectra check --old <PATH> --new <PATH> [--report <PATH>] [--format json|markdown|sarif] [--quiet]
+spectra check --baseline <DIR> --candidate <DIR> [--report <PATH>] [--format json|markdown|sarif] [--quiet]
 ```
 
 ```bash
-# Detect a regression and gate the merge:
-spectra check --old examples/lending_v1.json --new examples/lending_v2.json --format markdown
-# → exit 1, prints 4 BREAKING + 2 warning findings
+# Detect regressions and gate the merge:
+spectra check --baseline examples/vault_baseline --candidate examples/vault_candidate --format markdown
+# → exit 1, prints 6 BREAKING + 1 warning findings
 
-# Identical-IDL invariant: zero false positives on real production IDL:
-spectra check --old drift_v2.155.json --new drift_v2.155.json --format json --quiet
+# Strictly-differential invariant: identical input → zero false positives:
+spectra check --baseline examples/vault_baseline --candidate examples/vault_baseline --format json --quiet
 # → exit 0, zero stdout
 
 # GitHub Code Scanning integration:
-spectra check --old old.json --new new.json --format sarif --report out.sarif
+spectra check --baseline base/ --candidate pr/ --format sarif --report out.sarif
 # Then: github/codeql-action/upload-sarif@v3 with sarif_file: out.sarif
 ```
 
@@ -81,61 +73,44 @@ Exit-code contract (verified in CI):
 
 | Code | Meaning |
 |---|---|
-| `0` | Clean — no breaking findings. |
-| `1` | At least one BREAKING finding — block the merge. |
-| `2` | Invocation error — bad path, bad JSON, unknown `--format` value. |
-| `3` | Refuse-to-analyse — input is in a shape Spectra cannot soundly diff. |
+| `0` | Clean — no breaking regressions. |
+| `1` | At least one BREAKING regression — block the merge. |
+| `2` | Invocation error — bad path, unreadable source, unknown `--format` value. |
 
 **What Spectra is NOT:**
-- **Not a formal verifier.** It does not prove that invariants are preserved; that is audit-firm territory (~$15k–$100k, 2–6 weeks).
+- **Not an absolute scanner.** It does **not** find missing checks that were already missing in the baseline — that is Sec3 X-Ray / Auditware Radar / l3x / Octane territory, and Spectra is complementary to them, not a replacement.
+- **Not a formal verifier.** It does not prove invariants are preserved; that is audit-firm territory.
 - **Not a build-provenance tool.** It does not check that the deployed `.so` matches public source; that is `solana-verify` / `anchor verify`.
 - **Not a runtime monitor.** It is pre-merge only; for post-deploy alerting see Hypernative / Range.
-- **Not a mainnet-replay harness.** M2 uses `litesvm` with a hand-curated ≤50-tx per-pilot corpus, bounded to <60 s in CI. Heavy-corpus replay against historical mainnet upgrades is research scope, explicitly out.
-- **Not a Token-2022 TLV-extension detector.** TLV is not described in Anchor IDL; out of scope.
-- **Not a `.rodata` / constant differ.** Out of scope.
+- **Not a native-program analyser at M0.** Non-Anchor manual `is_signer` / `owner ==` checks are a documented M1 roadmap item, not silently mis-handled — see [`docs/NON_GOALS.md`](docs/NON_GOALS.md).
 
 ### Ecosystem Fit
 
 **Ecosystem Position:**
-Spectra sits between two existing layers in the Solana security stack:
 
 | Question | Existing tool | Spectra? |
 |---|---|---|
 | Does the deployed bytecode match public source? | `solana-verify`, `anchor verify` | No — different layer (build provenance) |
-| Are invariants provably preserved across the upgrade? | Audit-firm formal verification | No — different layer (proofs) |
-| **Will the upgrade preserve old users' data and old clients' calls?** | **(no public tool before Spectra)** | **Yes — this is the gap** |
-| Did something go wrong after the upgrade went live? | Hypernative, Range | No — too late by then |
-
-The middle row is the gap the open [Solana RFP](https://forum.solana.com/t/program-verification-tooling/1032) names directly. Spectra is the smallest credible answer.
+| Is there a missing account-validation check *anywhere* in this snapshot? | Sec3 X-Ray, Auditware Radar, l3x, Octane | No — that is the absolute scanners' job |
+| **Did this upgrade PR *remove or weaken* a guard the deployed version enforced?** | **(no public tool before Spectra)** | **Yes — this is the gap** |
+| Did something go wrong after the upgrade went live? | Hypernative, Range, STRIDE | No — too late by then |
 
 **Target Audience:**
 - **Primary:** Solana program teams shipping upgradeable Anchor programs into production (DeFi protocols, NFT marketplaces, oracles).
-- **Secondary:** Audit firms running pre-engagement diff scans on client programs before deeper review.
-- **Tertiary:** Solana Foundation grant reviewers and security partners who need a standard pre-engagement diff utility.
-
-**Needs Addressed:**
-- **Catch silent-corruption before deploy.** The single highest-impact case in the Solana upgrade-hazard taxonomy is detected with one CLI command in ~6 ms.
-- **Block breaking changes in CI.** Severity-gated exit code lets a `BREAKING` finding fail a build while a `warning` does not.
-- **Surface findings in the GitHub Security tab.** SARIF 2.1.0 output uploads to GitHub Code Scanning via the standard action — same surface as CodeQL.
-- **Zero false positives on identical input.** Asserted by both a test and a dedicated CI step against a 428 KB real production IDL.
+- **Secondary:** Audit firms running a pre-engagement regression diff between a client's deployed version and their proposed upgrade.
+- **Tertiary:** Solana Foundation security partners who want a standard upgrade-PR regression gate alongside the absolute scanners they already recommend.
 
 **Need Identification:**
-The CI-time / pre-merge upgrade-safety regression layer is unoccupied in the Solana Foundation's post-April-2026 security stack. After the Drift exploit, the Foundation consolidated its security investment around **STRIDE** (post-deployment operational evaluation, led by Asymmetric Research) and **SIRN** (incident response), plus a recommended set of free-ecosystem tools (Sec3 X-Ray, AuditWare Radar, Riverguard, Hypernative, Range). Every one of those operates either on a single source snapshot or post-deployment. None gates an *upgrade PR* on whether the new IDL silently corrupts existing on-chain accounts or collides discriminators. Full lifecycle mapping: [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md).
-
-**Honest detection boundary — the Drift exploit:** the Drift v2.155 → v2.162 IDL pair is used here as a real-world correctness + performance **fixture**. It is *not* a claim that Spectra would have prevented the April 2026 Drift exploit — it would not have. That exploit was social engineering → compromised signing devices → misleading multisig approvals → durable-nonce abuse → fictitious collateral (a STRIDE-pillar problem, not an IDL-diff problem). Spectra detects a *different*, narrow class of upgrade hazard. See [`docs/STRIDE_GAP_ANALYSIS.md §5`](docs/STRIDE_GAP_ANALYSIS.md).
+After the April 2026 Drift incident the Foundation consolidated its security investment around STRIDE (post-deployment operational evaluation) and SIRN (incident response), plus a recommended set of free absolute scanners (Sec3 X-Ray, Auditware Radar, and others). Every one of those is either post-deployment or single-snapshot. None gates an *upgrade PR* on whether it regresses an account-validation guarantee relative to the deployed baseline. Full lifecycle mapping: [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md).
 
 **Similar Projects in the Solana Ecosystem:**
-No public tool performs **pre-merge upgrade-safety regression** specifically. The closest layers, and why each is a different lifecycle stage:
+- **Sec3 X-Ray / Auditware Radar / l3x / Octane** — absolute (single-snapshot) static scanners. They have no notion of "the previous version", so a guard silently deleted in an upgrade is not surfaced *as a regression*; their false-positive rate is heuristic-tuned. Spectra is strictly-differential and complementary: it stays silent on absolute findings and fires only on removed guarantees.
+- **`solana-verifiable-build` / `anchor verify`** — build provenance; a different layer.
+- **STRIDE (Asymmetric Research)** — evaluates a *deployed* protocol's operational posture; one lifecycle stage later than Spectra.
+- **Audit-firm formal verification** — proves invariants on a specific revision; different cost class and scope.
+- **Hypernative / Range** — runtime monitors that fire *after* a bad upgrade ships; a different layer.
 
-- **`solana-verifiable-build` / `anchor verify`** — verifies *that the deployed bytecode came from a given source tree*, not whether the new version is compatible with old on-chain state. Different layer.
-- **STRIDE (Asymmetric Research)** — evaluates a *deployed* protocol's operational/multisig/governance posture; does not fire on an upgrade PR or diff IDL between versions. One lifecycle stage later than Spectra.
-- **Sec3 X-Ray / AuditWare Radar** — single-snapshot static source analysers; no notion of "the previous version", so they cannot detect a silent layout regression *relative to deployed state*.
-- **Riverguard (Neodyme)** — replays known exploit transactions; does not diff IDLs or detect same-discriminator-different-layout corruption.
-- **Audit-firm formal verification (OtterSec, Halborn, etc.)** — proves invariants on a specific revision, engagement-internal, ~$15k–$100k. Different cost class and scope.
-- **`diff -u` / `jd` / `dyff` / `json-diff`** — generic text/JSON diff tools. Benchmarked head-to-head in [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md); none knows what an Anchor discriminator is, so none can detect silent-corruption.
-- **Hypernative / Range** — runtime monitors that fire *after* a bad upgrade ships. Different layer (post-deploy).
-
-Spectra is therefore complementary, not substitutive, to every tool in this list — including STRIDE.
+Spectra is therefore complementary, not substitutive, to every tool in this list.
 
 ---
 
@@ -164,71 +139,74 @@ Spectra is therefore complementary, not substitutive, to every tool in this list
 
 ### Team's Experience
 
-20+ years of offensive-security and detection-engineering work, most recently Red Team lead at Indonesia's largest commercial bank by assets (a top-tier Southeast Asian financial institution serving 29M+ users). Three skill surfaces map one-to-one onto Spectra's three core surfaces:
+20+ years of offensive-security and detection-engineering work, most recently Red Team lead at Indonesia's largest commercial bank by assets (a top-tier Southeast Asian financial institution serving tens of millions of users). Three skill surfaces map one-to-one onto Spectra's design:
 
-1. **Binary diffing for vulnerability discovery** ↔ Spectra's discriminator and layout diff engine.
-2. **Authoring static analysers and detection signatures** ↔ Spectra's M0 11-rule catalogue and the M1 `Rule` trait roadmap in [`docs/RULE_ENGINE.md`](docs/RULE_ENGINE.md).
+1. **Authoring detection signatures with a near-zero false-positive bar** ↔ Spectra's strictly-differential design (a finding can only mean "a guarantee was removed").
+2. **Differential / regression analysis for vulnerability discovery** ↔ the baseline-vs-candidate guard-set diff engine.
 3. **Building CI-time security gates for production engineering teams** ↔ Spectra's severity-tiered exit code, SARIF output, and GitHub Action surface.
 
-The grant proposal honestly states the applicant has no prior Solana-specific OSS contributions. The M0 PoC shipped before grant submission — with green CI from the first commit and a validated real-world benchmark on Drift Protocol — is the direct mitigation for that gap.
+The applicant has no prior Solana-specific OSS contributions; the M0 PoC shipped before grant submission — with green CI from the first commit — is the direct mitigation for that gap.
 
 ---
 
 ## Development Status
 
-**Current Status:** M0 PoC is shipped, public, Apache-2.0-licensed, and validated against a real production upgrade. The repository is referenced in the grant proposal at [`02_proposals/drafts/solana-program-verification-tooling/final_proposal.md`](../02_proposals/drafts/solana-program-verification-tooling/final_proposal.md). Submission to https://solana.org/grants-funding is pending final pilot LOI outreach.
+**Current Status:** M0 PoC is shipped, public, and Apache-2.0-licensed. The repository is referenced in the grant proposal at [`02_proposals/drafts/solana-program-verification-tooling/final_proposal.md`](../02_proposals/drafts/solana-program-verification-tooling/final_proposal.md). Submission to https://solana.org/grants-funding is pending final pilot LOI outreach.
 
 **Proof of Concept:**
-Spectra was run against a real Solana mainnet program upgrade pair: [Drift Protocol v2](https://github.com/drift-labs/protocol-v2) commits `590049e6bf` (v2.155, 2026-01-21) → `0d35029d78` (v2.162, 2026-04-01). The IDLs are the public Anchor IDL JSONs committed to the protocol's SDK at those commits.
+The bundled synthetic fixture pair models a realistic upgrade regression. [`examples/vault_baseline`](examples/vault_baseline) is the "deployed" Anchor vault program; [`examples/vault_candidate`](examples/vault_candidate) is the "upgrade under review" that silently:
 
-- IDL size: 428 KB, 20,138 lines, 249 instructions, 27 accounts, 115 types, 26 events, 349 errors.
-- Changes between versions: 319 lines, scattered through the file.
-- **Spectra completed in 6 ms** and surfaced 6 findings (2 BREAKING + 4 warning).
-- **The interesting one:** Drift's `PerpMarket` account shrank `padding` from 23 bytes to 22 bytes and added a new `marketConfig: u8` in the freed byte. The `PerpMarket` discriminator (`0adf0c2c6bf537f7`) did not change. This is the silent-corruption pattern — safe **if and only if** every on-chain `PerpMarket`'s old padding byte was zero, dangerous otherwise. Exactly the case a reviewer needs to be told about explicitly.
-- **Zero false positives on a 428 KB production IDL.** Running Spectra with the same file as both `--old` and `--new` exits 0 with no findings.
+- drops `has_one = authority` on the `vault` slot of `Withdraw`;
+- downgrades `authority` from `Signer<'info>` to `UncheckedAccount<'info>` (signer check removed);
+- downgrades `destination` from `Account<'info, TokenAccount>` to `UncheckedAccount<'info>` and drops its `constraint` (type-cosplay + custom constraint removed);
+- drops the PDA `seeds`/`bump` derivation on `config`;
+- downgrades `token_program` from `Program<'info, Token>` to `UncheckedAccount` (CPI target no longer pinned);
+- adds a brand-new `EmergencyDrain` context with an unvalidated `anyone` slot (new attack surface — *warning*, not a regression of an existing guarantee).
 
-A human reviewer with a 393-line `diff -u` would need to do a 7-step Anchor + Borsh inference chain to reach the same conclusion. Spectra labels it `account_layout_changed_same_discriminator` directly. Reproduction commands and the line-by-line walkthrough: [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md).
+The `Initialize` context is byte-identical between the two versions and **must** produce zero findings — the strictly-differential property. Verbatim Spectra output (exit `1`):
+
+```markdown
+# Spectra Account-Validation Regression Report
+
+**Findings:** 6 breaking, 1 warning
+
+| Severity | Rule | Detail |
+|---|---|---|
+| BREAKING | has_one_constraint_removed | `Withdraw::vault` dropped `has_one = authority` |
+| BREAKING | signer_check_removed | `Withdraw::authority` no longer requires a signer (baseline did) |
+| BREAKING | type_cosplay_protection_removed | `Withdraw::destination` downgraded `TokenAccount` -> `UncheckedAccount<'info>` (owner+discriminator check lost) |
+| BREAKING | custom_constraint_removed | `Withdraw::destination` dropped `constraint = destination.owner==authority.key()` |
+| BREAKING | pda_derivation_removed | `Withdraw::config` dropped PDA `seeds`/`bump` derivation |
+| BREAKING | cpi_target_unpinned | `Withdraw::token_program` CPI target program id no longer pinned |
+| warning | unvalidated_account_introduced | `EmergencyDrain::anyone` new UncheckedAccount/AccountInfo slot (new attack surface) |
+
+> Spectra exits non-zero when any BREAKING finding is present: this upgrade takes away a security guarantee the deployed version already gave its users. Review each row before deploy.
+```
+
+**Real-world validation:** `[NO PUBLIC DATA AVAILABLE]` at M0. A reproducible benchmark against a real public Anchor program's deployed-vs-upgrade source pair is an explicit M1 deliverable (see Roadmap M1.5). The M0 evidence base is the synthetic fixture above plus the test suite — no real-world numbers are claimed that have not been measured.
 
 **Development Progress (M0 — shipped):**
 - ✅ Rust core engine ([`spectra-core`](spectra-core)) + `spectra` CLI binary.
 - ✅ Python wrapper ([`spectra-cli`](spectra-cli)) with `spectra-py` entry point.
 - ✅ GitHub Action scaffold ([`spectra-action/action.yml`](spectra-action/action.yml)).
-- ✅ 11 rule types covering Anchor legacy-schema IDLs (full table below).
+- ✅ 9 finding kinds covering Anchor `#[derive(Accounts)]` guard regressions (full table below).
 - ✅ JSON, Markdown, and SARIF 2.1.0 output formats.
-- ✅ Severity-tiered exit code (0 / 1 / 2 / 3) verified by 3 dedicated CI steps.
-- ✅ 8 tests green (2 unit + 6 integration), including the Anchor `sha256("global:initialize")[..8] = afaf6d1f0d989bed` known-vector assertion.
-- ✅ Synthetic regression fixture ([`examples/lending_v1.json`](examples/lending_v1.json) → [`examples/lending_v2.json`](examples/lending_v2.json)) detects 4 BREAKING + 2 warning findings.
-- ✅ Real-world validation on Drift Protocol v2.155 → v2.162 (6 ms, 6 findings, one real silent-corruption case).
-- ✅ Head-to-head benchmark against `diff -u`, `jd`, `dyff`, `json-diff` ([`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md)).
-- ✅ Asciinema demo recording committed at [`demo.cast`](demo.cast).
-- ✅ Apache 2.0 license (relicensed from MIT on 2026-05-15 for explicit patent grant + Solana SDK alignment).
+- ✅ Severity-tiered exit code (0 / 1 / 2) verified by dedicated CI steps.
+- ✅ 6 integration tests green, including the strictly-differential no-false-positive property (an unchanged context in a changed program yields zero findings).
+- ✅ Synthetic baseline → candidate Anchor fixture pair ([`examples/vault_baseline`](examples/vault_baseline) → [`examples/vault_candidate`](examples/vault_candidate)) → 6 BREAKING + 1 warning.
+- ✅ `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` clean.
+- ✅ Apache 2.0 license.
 
 **Testing and Validation:**
-- **Static checks gated in CI:** `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build --release`.
-- **Unit + integration tests:** `cargo test --release` runs 8 tests covering the Anchor discriminator known-vector, synthetic-regression detection, identical-IDL clean-report invariant, no-false-positive-collision, SARIF schema validity, SARIF clean-empty output, and the Markdown silent-corruption row.
-- **End-to-end demo gates:** CI runs `spectra check` on the bundled v1→v2 regression fixture and asserts exit `1`; runs the same file against itself and asserts exit `0`; runs SARIF output and validates it parses as JSON; runs an unknown `--format` and asserts exit `2`; runs `--quiet` on a clean input and asserts zero stdout.
-- **CI runs:** every push has been green. Recent runs: [`25913583638`](https://github.com/ayodyadsr/spectra/actions/runs/25913583638) (Apache 2.0 relicense), [`25912798879`](https://github.com/ayodyadsr/spectra/actions/runs/25912798879) (competitive benchmark + SARIF), [`25910510275`](https://github.com/ayodyadsr/spectra/actions/runs/25910510275) (real-world Drift validation).
+- **Static checks gated in CI:** `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build --release --workspace`.
+- **Integration tests:** `cargo test --release --workspace` runs 6 tests covering: synthetic-upgrade detection (asserts exactly 6 breaking + 1 warning and each specific finding), identical-program clean report, the strictly-differential no-false-positive property (zero findings name the unchanged `Initialize` context), SARIF schema validity, SARIF clean-empty output, and the Markdown signer-regression row.
+- **End-to-end demo gates:** CI runs `spectra check` on the bundled baseline → candidate fixture and asserts exit `1`; runs the same tree against itself and asserts exit `0`; validates SARIF parses as JSON with exactly 7 results; runs an unknown `--format` and asserts exit `2`; runs `--quiet` on a clean input and asserts zero stdout.
 
 **Known Limitations:**
-- **Anchor legacy-schema only at M0.** Anchor 2026 (Codama schema), native programs (Shank-generated IDL), and the defined-type / events / errors reference graph are M1 deliverables.
-- **No `.so` bytecode parsing at M0.** ELF + BPF disassembly is M1.
-- **No PDA-drift detection.** Marked as Future Expansion in the proposal, not promised in this grant.
-- **Native-program `#[repr(C)]` / `bytemuck` alignment padding** is not surfaced in Anchor IDL; will be addressed in M1 with Shank-IDL parsing.
-- **`spectra-allow.toml` suppression file** for intentional schema extensions does not yet exist; lands in M3.
-
-**Research & Preparation Completed (pre-grant, at the applicant's own cost):**
-
-The work below was completed and pushed to https://github.com/ayodyadsr/spectra *before* this grant application, both to mitigate the "no prior Solana-specific OSS contributions" risk and to make the engineering claims independently reproducible by a reviewer:
-
-1. **Ecosystem and RFP analysis.** Surveyed the Solana forum's open [Program Verification Tooling RFP](https://forum.solana.com/t/program-verification-tooling/1032), the Anchor + Foundation GitHub orgs, and prior grant rounds. Identified that the named gap (upgrade-safety regression) sits between `solana-verifiable-build` (build provenance) and audit-firm formal verification — no public tool fills it.
-2. **Solana-edge-case taxonomy.** Catalogued 25 documented Solana program upgrade hazards in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md), classified by detection layer (static-IDL / runtime-replay / out-of-scope) and used to define the per-milestone coverage targets in [Success Metrics](#success-metrics).
-3. **M0 engineering shipped.** Rust core engine + Python wrapper + GitHub Action scaffold + CI workflow (`fmt` + `clippy -D warnings` + `build` + `test` + 5 demo-gate steps) + 8 green tests (2 unit + 6 integration) including the Anchor known-vector assertion `sha256("global:initialize")[..8] = afaf6d1f0d989bed`. All from commit `e42a0c1` onward, all CI green.
-4. **Real-world validation on Drift Protocol v2.155 → v2.162.** 428 KB production Anchor IDL, 20,138 lines, 249 instructions. Spectra surfaced 6 findings in 6 ms, including the real `PerpMarket` padding-to-config silent-corruption case. Identical-IDL exit-0 invariant verified on the same 428 KB input. Reproduction commands: [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md).
-5. **Competitive head-to-head benchmark.** Wall-clock + behavioural comparison against `diff -u` (GNU 3.10), `jd` 1.9.2, `dyff`, `json-diff` (npm) on the same Drift IDL pair. Spectra is the only one that distinguishes BREAKING from warning via exit code, the only one that does not trip on `prettier --write` whitespace reformat, and the only one that can detect silent corruption at all. Methodology + raw measurements: [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md).
-6. **Q1-style technical paper.** ~600-line, 9-section document at [`docs/PAPER.md`](docs/PAPER.md) covering threat model, rule taxonomy, coverage analysis with correct denominator (n=25), real-world validation, competitive benchmark, threats to validity, and bibliography.
-7. **Engineering documentation suite.** 17+ docs under [`docs/`](docs/) covering threat model, non-goals, severity contract, architecture, edge-case matrix, false-positive policy, CI integration templates, rule-engine internals, migration / suppression schema, Anchor-specific hazards, adoption plan, and roadmap with acceptance gates.
-8. **License hardening.** Relicensed MIT → Apache 2.0 on 2026-05-15 for the explicit patent grant in Apache §3, aligning with `solana-verifiable-build`, the Solana SDK, and Anza-published developer tooling. Canonical Apache 2.0 text from apache.org (`md5 3b83ef96387f14655fc854ddc3c6bd57`).
-9. **Reproducible demo.** Asciinema cast committed at [`demo.cast`](demo.cast), regenerable from [`scripts/record-demo.sh`](scripts/record-demo.sh). Verbatim report output embedded in this README (see [§Quick Start](#quick-start)).
+- **Anchor `#[derive(Accounts)]` only at M0.** Native (non-Anchor) manual `is_signer` / `owner ==` checks are an M1 roadmap item, explicitly documented in [`docs/NON_GOALS.md`](docs/NON_GOALS.md), not silently mis-handled.
+- **Source-tree input, not on-chain bytecode.** Spectra diffs two source trees; obtaining the baseline tree (e.g. from the verified-build source of the deployed version) is the operator's responsibility at M0.
+- **A context removed wholesale** is treated as an interface change, not a silent weakening of a still-callable instruction — out of M0 scope by design.
+- **`spectra-allow.toml` suppression file** for intentional guard changes lands in M3.
 
 ---
 
@@ -242,65 +220,44 @@ source "$HOME/.cargo/env"
 # 2. Clone and build:
 git clone https://github.com/ayodyadsr/spectra
 cd spectra
-cargo build --release
+cargo build --release --workspace
 
-# 3. Run the demo (the synthetic regression fixture):
+# 3. Run the demo (the synthetic baseline → candidate fixture pair):
 ./target/release/spectra check \
-  --old examples/lending_v1.json \
-  --new examples/lending_v2.json \
+  --baseline examples/vault_baseline \
+  --candidate examples/vault_candidate \
   --format markdown
-# → exit 1, prints the 4 BREAKING + 2 warning findings shown below
+# → exit 1, prints the 6 BREAKING + 1 warning findings shown above
 
-# 4. Run the test suite (8 tests, all green):
-cargo test --release
+# 4. Verify the strictly-differential property (identical input → clean):
+./target/release/spectra check \
+  --baseline examples/vault_baseline \
+  --candidate examples/vault_baseline
+# → exit 0, zero findings
 
-# 5. Replay the asciinema demo:
-asciinema play demo.cast
+# 5. Run the test suite (6 integration tests, all green):
+cargo test --release --workspace
 ```
 
 For a hermetic, container-only reproduction with no Rust toolchain on the host, see the multi-stage [`Dockerfile`](Dockerfile) — also exercised on every push by the `docker` CI job. Full step-by-step testing guide: [`docs/TESTING.md`](docs/TESTING.md).
 
-### What the report looks like
-
-Verbatim output of the demo command above (exit code `1`):
-
-```markdown
-# Spectra Diff Report
-
-**Old program:** `lending`
-**New program:** `lending`
-
-**Findings:** 4 breaking, 2 warning
-
-| Severity | Kind | Detail |
-|---|---|---|
-| BREAKING | instruction_args_changed | `deposit`: [amount: u64] -> [amount: u128] |
-| BREAKING | instruction_removed | `withdraw` (disc b712469c946da122) |
-| warning  | instruction_added | `withdrawFunds` (disc 52b7b3ffcd4ed2be) |
-| warning  | account_field_added | `Pool.fee_bps: u16` |
-| BREAKING | account_field_reordered | `Pool`: [total_supply, rate, authority] -> [total_supply, authority, rate, fee_bps] |
-| BREAKING | account_layout_changed_same_discriminator | `Pool` layout changed but discriminator f19a6d0411b16dbc is unchanged (silent-corruption risk) |
-```
-
 ---
 
-## All 11 things Spectra checks today (M0)
+## The 9 things Spectra checks today (M0)
 
 | Finding | Severity | What it means in plain words |
 |---|---|---|
-| `instruction_removed` | BREAKING | An old function was deleted. Old apps calling it fail with `InstructionFallbackNotFound`. |
-| `instruction_args_changed` | BREAKING | A function's inputs changed shape. Old callers send the wrong bytes. |
-| `instruction_added` | warning | A new function was added. Informational. |
-| `account_removed` | BREAKING | An account type was deleted. Old account data can no longer be read. |
-| `account_added` | warning | A new account type was added. Informational. |
-| `account_field_removed` | BREAKING | A field was deleted from an account. Old accounts now misalign. |
-| `account_field_added` | warning | A field was added. Check that storage resize is handled. |
-| `account_field_reordered` | BREAKING | Field order changed. Old accounts now read wrong fields. |
-| `account_field_type_changed` | BREAKING | A field changed type (e.g. `u64 → u128`). Old data is the wrong width. |
-| `account_layout_changed_same_discriminator` | BREAKING | **Silent corruption.** Layout changed but the discriminator did not. The runtime accepts old data and reads it into the new layout. |
-| `discriminator_collision` | BREAKING | Two different names produce the same 8-byte SHA-256 tag. Calls get misrouted. |
+| `signer_check_removed` | BREAKING | Baseline required this account to sign; the candidate no longer does. The canonical missing-signer-check bug, introduced on upgrade. |
+| `type_cosplay_protection_removed` | BREAKING | Baseline used a typed wrapper (owner + discriminator check); the candidate downgraded the slot to `UncheckedAccount` / `AccountInfo`. |
+| `owner_check_removed` | BREAKING | Baseline pinned the account owner (`owner =` / `address =`); the candidate dropped that pin. |
+| `has_one_constraint_removed` | BREAKING | Baseline enforced a `has_one` relational-integrity check the candidate dropped. |
+| `custom_constraint_removed` | BREAKING | Baseline enforced a custom `constraint =` predicate the candidate dropped. |
+| `pda_derivation_removed` | BREAKING | Baseline derived the account as a PDA (`seeds`/`bump`); the candidate dropped the derivation, allowing an arbitrary account. |
+| `cpi_target_unpinned` | BREAKING | Baseline pinned a CPI target program id (`Program<'info, T>` / `address`); the candidate downgraded it to an unvalidated account. |
+| `validated_account_slot_removed` | BREAKING | A validated account slot present in the baseline context was removed while the context still exists. |
+| `unvalidated_account_introduced` | warning | The candidate introduces a brand-new `UncheckedAccount` / `AccountInfo` slot that did not exist in the baseline — new attack surface to review (not a regression of an existing guarantee). |
 
-The full rule roadmap reaches **23 rule types** across M0–M2; see [`docs/SEVERITY.md`](docs/SEVERITY.md) for the canonical list with rule IDs, severity tiers, and the exit-code contract.
+Canonical rule IDs, severity tiers, and the exit-code contract: [`docs/SEVERITY.md`](docs/SEVERITY.md).
 
 ---
 
@@ -310,7 +267,7 @@ This roadmap is the version submitted to the Solana Foundation. Every milestone 
 
 ### Overview
 
-- **Estimated Duration:** 16 weeks (post-grant) + 2 weeks of pre-grant M0 work already shipped.
+- **Estimated Duration:** 16 weeks (post-grant) + pre-grant M0 work already shipped.
 - **Full-Time Equivalent (FTE):** ~0.875 FTE (35 hr/week × 16 weeks).
 - **Total Costs:** **$28,115 USD**.
 
@@ -319,57 +276,51 @@ This roadmap is the version submitted to the Solana Foundation. Every milestone 
 | Number | Deliverable | Specification | Status |
 | ---: | --- | --- | --- |
 | 0a. | License | Apache License 2.0 applied to the project. | ✅ ([`LICENSE`](LICENSE)) |
-| 0b. | Documentation | Comprehensive `docs/` covering threat model, severity contract, architecture, edge cases, FP policy, CI integration, rule engine, and adoption plan. README explains setup, CLI, and full report format. | ✅ ([`docs/`](docs/)) |
-| 0c. | Testing and Testing Guide | 8 green tests (2 unit + 6 integration) including Anchor known-vector discriminator, synthetic-regression detection, identical-IDL clean-report invariant, no-false-positive collision, SARIF schema validity. Reproduction: `cargo test --release`. | ✅ |
-| 0d. | Demo | Asciinema cast committed at [`demo.cast`](demo.cast); regenerate with [`scripts/record-demo.sh`](scripts/record-demo.sh). | ✅ |
-| 0e. | Article | Q1-style technical paper at [`docs/PAPER.md`](docs/PAPER.md) (~600 lines, 9 sections including real-world Drift validation). | ✅ |
-| 1. | Anchor legacy-schema IDL diff | 11 rule types, severity-tiered, deterministic output. | ✅ |
+| 0b. | Documentation | `docs/` covering threat model, severity contract, architecture, non-goals, FP policy, CI integration, and adoption plan. README explains setup, CLI, and full report format. | ✅ ([`docs/`](docs/)) |
+| 0c. | Testing and Testing Guide | 6 integration tests including the strictly-differential no-false-positive property. Reproduction: `cargo test --release --workspace`. | ✅ |
+| 0d. | Demo | Reproducible synthetic fixture pair + asciinema recorder ([`scripts/record-demo.sh`](scripts/record-demo.sh)). | ✅ |
+| 1. | Anchor `#[derive(Accounts)]` guard-regression diff | 9 finding kinds, severity-tiered, deterministic output. | ✅ |
 | 2. | Output formats | JSON + Markdown + SARIF 2.1.0; SARIF uploads via `github/codeql-action/upload-sarif@v3`. | ✅ |
-| 3. | Real-world validation | Drift Protocol v2.155 → v2.162, 428 KB IDL, 6 ms wall-clock, 6 findings including one real silent-corruption case. | ✅ ([`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md)) |
-| 4. | Competitive benchmark | Head-to-head against `diff -u`, `jd`, `dyff`, `json-diff` on the same Drift IDL pair. | ✅ ([`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md)) |
 
-### Milestone 1 — Schema parity + collision/silent-corruption hardening — 4 weeks — $6,300
+### Milestone 1 — Native programs + real-world validation — 4 weeks — $6,300
 
 | Number | Deliverable | Specification |
 | ---: | --- | --- |
-| 0a. | License | Apache License 2.0 (applied at M0 in [`LICENSE`](LICENSE); remains in force for the full project lifetime). |
-| 0b. | Documentation | Inline Rustdoc on all public crate items (`cargo doc --no-deps` builds cleanly under `-D missing_docs`); per-new-rule entry in [`docs/SEVERITY.md`](docs/SEVERITY.md); per-edge-case row in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) updated with Codama + Shank parser stage. |
-| 0c. | Testing and Testing Guide | Golden-file test suite covering 8 documented breakage classes added to `spectra-core/tests/`; `cargo test --release` continues to be the single test entry; testing guide published as `docs/TESTING.md` describing how to add a new golden case. |
-| 0d. | Repository | All M1 source, tests, golden fixtures, and parser adapter code committed to https://github.com/ayodyadsr/spectra; release tagged `v0.2.0-m1`; reproduces deterministically from a clean clone. |
-| 0e. | Article | Tutorial article `docs/TUTORIAL_M1.md` walking through Anchor 2026 (Codama) + Shank native-IDL diffing on a worked public-program example, linked from the README documentation index. |
-| 1.1 | Anchor 2026 (Codama) parser | Auto-detection at `Idl::from_path`; full coverage of the Codama node graph. |
-| 1.2 | Shank native IDL parser | Anchor-free path for native programs; surfaces `#[repr(C)]` / `bytemuck` alignment padding the legacy IDL omits. |
-| 1.3 | Defined-type resolution | Nested `types`, `events`, and `errors` diffed via reference graph (M0 ignores them). |
-| 1.4 | Cross-name discriminator-collision check | Pairwise check over all instruction + account names in both old and new IDLs. |
-| 1.5 | Silent-corruption layout check (hardened) | Width changes, padding changes, alignment changes, all surfaced; covered by golden-file test suite of 8 documented breakage classes. |
-| 1.6 | Loader-version adapter | Thin adapter isolating BPF Loader v3 / v4 differences; 40 hr contingency budgeted separately for Loader v4 / SBPF activation. |
+| 0a. | License | Apache License 2.0 (remains in force). |
+| 0b. | Documentation | Inline Rustdoc on all public items (`cargo doc` clean under `-D missing_docs`); per-new-finding entry in [`docs/SEVERITY.md`](docs/SEVERITY.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) updated with the native-program parser stage. |
+| 0c. | Testing and Testing Guide | Golden-file suite covering each finding kind added to `spectra-core/tests/`; `cargo test --release --workspace` remains the single entry; testing guide describes how to add a new golden case. |
+| 0d. | Repository | All M1 source/tests committed; release tagged `v0.3.0-m1`; reproduces deterministically from a clean clone. |
+| 0e. | Article | Tutorial walking through a native-program regression diff on a worked public example. |
+| 1.1 | Native (non-Anchor) guard extraction | Detect manual `is_signer` / `owner ==` / `key ==` checks so the differ covers non-Anchor programs. |
+| 1.2 | Cross-version slot-rename heuristic | Reduce false negatives when a slot is renamed but its guard set is unchanged. |
+| 1.3 | Defined-constraint resolution | Resolve `constraint =` expressions that reference helper functions / consts rather than treating them as opaque strings. |
+| 1.4 | Whole-context-removal policy | Optional stricter mode that flags removal of an entire validated context. |
+| 1.5 | Real-world validation | Reproducible benchmark against a real public Anchor program's deployed-vs-upgrade source pair; report committed. |
 
 ### Milestone 2 — `litesvm` pre-deployment harness — 5 weeks — $7,875
 
 | Number | Deliverable | Specification |
 | ---: | --- | --- |
-| 2.1 | `spectra harness` subcommand | Loads a hand-curated per-protocol transaction corpus (≤50 tx, committed in pilot's `spectra-fixtures/`) into a `litesvm` instance with `v_{n+1}` loaded. |
-| 2.2 | Deserialisation panic reporter | Reports per-tx deserialisation failures (the runtime equivalent of M0's static silent-corruption finding). |
-| 2.3 | Account-validation regression reporter | Reports `AccountNotInitialized` / `AccountDidNotDeserialize` / discriminator-mismatch regressions per tx. |
-| 2.4 | CPI return-code regression reporter | Reports per-CPI return-code differences. |
-| 2.5 | Bounded budget | <60 s wall-clock in a free-tier GitHub Actions runner. Explicitly **not** a mainnet snapshot replay. |
-| 2.6 | Worked example | One end-to-end run against a public upgradable Anchor program of the applicant's choosing; corpus committed, report committed. |
+| 2.1 | `spectra harness` subcommand | Loads a hand-curated per-protocol transaction corpus (≤50 tx) into a `litesvm` instance with the candidate loaded. |
+| 2.2 | Guard-regression replay reporter | Reports per-tx `AccountNotInitialized` / `AccountDidNotDeserialize` / signer-missing regressions that the static differ predicted. |
+| 2.3 | Bounded budget | <60 s wall-clock on a free-tier GitHub Actions runner. Explicitly **not** a mainnet snapshot replay. |
+| 2.4 | Worked example | One end-to-end run against a public upgradable Anchor program; corpus + report committed. |
 
 ### Milestone 3 — Suppression file + Action + PR comment — 4 weeks — $6,300
 
 | Number | Deliverable | Specification |
 | ---: | --- | --- |
-| 3.1 | `spectra-allow.toml` schema | Per-finding suppression with mandatory `rationale`, `expires`, and `upgrade_pr` fields. No silent waivers. Schema documented in [`docs/MIGRATION.md`](docs/MIGRATION.md). |
+| 3.1 | `spectra-allow.toml` schema | Per-finding suppression with mandatory `rationale`, `expires`, and `upgrade_pr` fields. No silent waivers. |
 | 3.2 | Composite GitHub Action | Published on the GitHub Marketplace; Spectra's own CI uses the published action as its smoke test. |
 | 3.3 | PR comment integration | Single-comment-per-PR format that updates in place on subsequent pushes (no thread spam). |
-| 3.4 | mdBook getting-started page | Hosted on GitHub Pages; covers install, first run, suppression file workflow. |
+| 3.4 | mdBook getting-started page | Hosted on GitHub Pages; covers install, first run, suppression-file workflow. |
 
 ### Milestone 4 — Pilot + walkthroughs + community docs — 3 weeks — $5,400
 
 | Number | Deliverable | Specification |
 | ---: | --- | --- |
 | 4.1 | ≥1 confirmed protocol pilot | LOI signed during M0–M3 (outreach template at [`02_proposals/drafts/solana-program-verification-tooling/loi_outreach.md`](../02_proposals/drafts/solana-program-verification-tooling/loi_outreach.md)); pilot integrates Spectra into their CI. Pilot CI logs published. |
-| 4.2 | 2 publicly documented integration walkthroughs | Against real upgradable Anchor programs of the applicant's choosing (no signature required). Each walkthrough is plain markdown: commits + CI run links + diff report + analysis. |
+| 4.2 | 2 publicly documented integration walkthroughs | Against real upgradable Anchor programs of the applicant's choosing. Each is plain markdown: commits + CI run links + diff report + analysis. |
 | 4.3 | mdBook documentation complete | Full reference + per-milestone tutorial. |
 | 4.4 | Solana Discord AMA | One community office-hour session. Recording published. |
 
@@ -379,81 +330,52 @@ This roadmap is the version submitted to the Solana Foundation. Every milestone 
 | --- | --- | --- | --- | --- | --- |
 | Personnel | Lead engineering (applicant) | 35 hr | 16 weeks | $45/hr | $25,200 |
 | Personnel | Pilot integration support (M4) | 5 hr | 3 weeks | $45/hr | $675 |
-| Personnel | Loader-version adapter buffer (one-time contingency for Loader v4 / SBPF activation mid-grant) | 40 hr | one-time | $45/hr | $1,800 |
+| Personnel | Native-program parser buffer (one-time contingency) | 40 hr | one-time | $45/hr | $1,800 |
 | Subscriptions | Archive RPC for `litesvm` corpus curation (Helius / Triton dev tier) | — | 4 months @ $80/mo | — | $320 |
 | Subscriptions | Domain + mdBook hosting | — | 4 months | — | $120 |
 | | | | | **Total** | **$28,115 USD** |
 
-Rate alignment: $45/hr is conservative against Solana Mobile Builder Grant precedent ($10K × 10 teams) scaled for a multi-month engineering deliverable, and well below typical audit-firm engineering rates for equivalent Solana-security work. Both contingency line items address publicly known risks (SIMD-tracked loader upgrades; absence of an in-CI mainnet snapshot path) rather than scope expansion.
-
----
-
-## How Spectra compares to generic JSON / YAML diff tools
-
-A fair early question: "isn't there already a JSON diff tool that does this?" We tested the four most-installed candidates on the same Drift IDL pair. Best of 5 runs each, commodity laptop:
-
-| Tool | Wall-clock on 428 KB Drift IDL | Exits 1 on BREAKING only? | False positive on whitespace reformat? | Detects silent corruption? |
-|---|---:|---|---|---|
-| `diff -u` (GNU 3.10) | 5 ms | no | **yes — 39,715 noise lines** | no |
-| `jd` (Go) | 32 ms | no (exits 1 on any change) | no | no |
-| `dyff` (Go) | 106 ms | no (exits 0 *always*) | no | no |
-| `json-diff` (npm) | 9,217 ms | no (exits 1 on any change) | no | no |
-| **Spectra** | **6 ms** | **yes** | **no** | **yes** |
-
-Plain-words translation:
-
-- Every other tool either blocks every harmless additive change (bar 1), never blocks anything (bar 2), or trips on `prettier --write` (bar 3). Each one fails to be useful as a CI gate for at least one reason.
-- Spectra is the only one that knows what an Anchor discriminator is, so it is the only one that can detect silent-corruption at all.
-- Spectra is ~16× faster than the fastest semantic alternative (`jd`) and within ~1.5× of `diff -u` while doing dramatically more useful work.
-
-Full methodology, raw measurements, and reproduction commands: [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md).
+Rate alignment: $45/hr is conservative against Solana Mobile Builder Grant precedent scaled for a multi-month engineering deliverable, and well below typical audit-firm engineering rates for equivalent Solana-security work.
 
 ---
 
 ## Testing & Verification Strategy
 
-Every milestone is **gated by acceptance tests**, not by activity. Each deliverable below maps to a specific check a grant reviewer can run on the linked commit.
+Every milestone is **gated by acceptance tests**, not by activity. Each deliverable maps to a specific check a grant reviewer can run on the linked commit.
 
 **Static checks (gated in CI on every push, all milestones):**
 - `cargo fmt -- --check` — formatting deviation fails CI.
 - `cargo clippy --all-targets -- -D warnings` — every warning is an error.
-- `cargo build --release` — release build must succeed on Linux GHA runner.
+- `cargo build --release --workspace` — release build must succeed on the Linux GHA runner.
 
 **Test suite (gated in CI):**
-- `cargo test --release` — currently 8 tests pass (2 unit + 6 integration), including:
-  - Anchor known-vector discriminator assertion: `sha256("global:initialize")[..8] = afaf6d1f0d989bed`.
-  - Synthetic-regression detection: 4 BREAKING + 2 warning findings on the `lending_v1 → lending_v2` fixture.
-  - Identical-IDL clean-report invariant: `spectra check --old X --new X` produces zero findings.
-  - No-false-positive collision: two non-colliding discriminators must not be flagged.
-  - SARIF output schema validity: emitted SARIF parses as JSON and contains required top-level keys.
+- `cargo test --release --workspace` — 6 integration tests pass, including:
+  - Synthetic-upgrade detection: exactly 6 BREAKING + 1 warning, with each specific finding asserted by kind + account.
+  - Identical-program clean report: zero findings, exit `0`.
+  - **Strictly-differential no-false-positive property:** no finding may name the unchanged `Initialize` context even though the program as a whole changed.
+  - SARIF schema validity: emitted SARIF parses as JSON, `version == "2.1.0"`, driver name `Spectra`, one result per finding.
   - SARIF clean-empty: zero findings produces a valid SARIF document with an empty `results` array.
-  - Markdown silent-corruption row: the silent-corruption finding is correctly rendered in Markdown.
+  - Markdown signer-regression row: the signer regression is named by rule id and tier in Markdown.
 
 **End-to-end demo gates (gated in CI):**
-- Demo exit-1: `spectra check` on the bundled `lending_v1 → lending_v2` fixture must exit `1`.
-- Identical-IDL exit-0: same file as `--old` and `--new` must exit `0`.
-- SARIF JSON parse: `--format sarif` output piped through `python -m json.tool` must succeed and exit `1`.
-- Exit-2 invocation error: `--format definitely-not-a-format` must exit `2` (not `1` and not `0`).
-- `--quiet` no-output-on-clean: identical-IDL run with `--quiet` must produce zero stdout.
+- Demo exit-1: `spectra check` on the bundled baseline → candidate fixture must exit `1`.
+- Identical-tree exit-0: same tree as `--baseline` and `--candidate` must exit `0`.
+- SARIF JSON parse: `--format sarif` output must parse as JSON with exactly 7 results and exit `1`.
+- Exit-2 invocation error: `--format definitely-not-a-format` must exit `2` (not `1`, not `0`).
+- `--quiet` no-output-on-clean: identical-tree run with `--quiet` must produce zero stdout.
 
-**Real-world validation:**
-- Drift Protocol v2.155 → v2.162 (428 KB IDL, 20,138 lines, 249 instructions, 27 accounts) — reproducible via the commands in [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md). Wall-clock 6 ms, 6 findings including one real silent-corruption case on `PerpMarket`. Identical-IDL invariant verified on this 428 KB production input.
-
-**Competitive verification:**
-- Head-to-head against `diff -u` 3.10, `jd` 1.9.2, `dyff` 1.10, `json-diff` 1.0.6 on the same Drift IDL pair — reproducible via the commands in [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md). Best of 5 wall-clock runs each.
-
-**Milestone-by-milestone acceptance gates** are listed in [`docs/ROADMAP.md`](docs/ROADMAP.md). Each milestone tag (`v0.2.0-m1`, `v0.3.0-m2`, etc.) will reference the specific CI run that validates the milestone is complete. M0 acceptance criteria have all passed as of commit [`2c42501`](https://github.com/ayodyadsr/spectra/commit/2c42501) (CI run [25915263868](https://github.com/ayodyadsr/spectra/actions/runs/25915263868)).
+**Real-world validation:** `[NO PUBLIC DATA AVAILABLE]` at M0 — an explicit M1.5 deliverable. No real-world performance or detection numbers are claimed at M0 that have not been measured.
 
 **Reproduction from a clean clone:**
 ```bash
 git clone https://github.com/ayodyadsr/spectra && cd spectra
-cargo test --release                               # 8 tests pass
+cargo test --release --workspace                   # 6 tests pass
 ./target/release/spectra check \
-  --old examples/lending_v1.json \
-  --new examples/lending_v2.json                   # exit 1
+  --baseline examples/vault_baseline \
+  --candidate examples/vault_candidate              # exit 1
 ./target/release/spectra check \
-  --old examples/lending_v1.json \
-  --new examples/lending_v1.json                   # exit 0
+  --baseline examples/vault_baseline \
+  --candidate examples/vault_baseline               # exit 0
 ```
 
 ---
@@ -461,121 +383,49 @@ cargo test --release                               # 8 tests pass
 ## Future Plans
 
 **Maintenance Commitment:**
-Beyond the funded milestones, the applicant commits to maintaining Spectra for a **minimum of 12 months** after M4 completion — bug fixes, security patches, compatibility updates for new Anchor / Shank / Codama schema versions, and a Loader v4 adapter (or later) within 4 weeks of any new BPF-loader version reaching mainnet activation.
+Beyond the funded milestones, the applicant commits to maintaining Spectra for a **minimum of 12 months** after M4 completion — bug fixes, security patches, and compatibility updates for new Anchor schema versions.
 
 **Sustainability Strategy:**
-- **Bounded surface area.** Spectra deliberately does not chase formal verification, runtime monitoring, or full mainnet replay. The thing it does — schema-and-discriminator-aware diff — has a small, well-defined surface that does not require constant catch-up with the rest of the Solana stack.
-- **Loader-version isolation.** Architecture isolates BPF Loader concerns behind a thin adapter (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)). A new loader version is a one-module change, not a rewrite.
-- **Dogfooding.** Spectra's own CI uses the M3-published Action as its smoke test starting M3, so any regression in the Action breaks Spectra's own merges first.
-- **No SaaS commitment.** The tool is a CLI + Action + library. No hosted service, no infrastructure surface, no subscription billing. Maintenance load is proportional only to code + Solana schema drift.
-
-**Short-term Plans (6–12 months post-grant):**
-- Active engagement with the Solana developer community via the [forum.solana.com RFP thread](https://forum.solana.com/t/program-verification-tooling/1032), the Solana Discord `#tooling` channel, and the Anchor Discord.
-- Outreach to audit firms (OtterSec, Halborn, Trail of Bits, Neodyme, Zellic) offering Spectra as a free pre-engagement diff utility, with the explicit goal of getting it into standard audit-engagement workflows.
-- Coordinate with Solana Foundation security partners so Spectra-flagged findings appear consistently in pre-deployment review checklists.
+- **Bounded surface area.** Spectra deliberately does not chase formal verification, runtime monitoring, or full mainnet replay. The strictly-differential guard-set diff has a small, well-defined surface.
+- **No SaaS commitment.** The tool is a CLI + Action + library. No hosted service, no infrastructure surface, no subscription billing.
+- **Dogfooding.** Spectra's own CI uses the M3-published Action as its smoke test starting M3.
 
 **Long-term Vision:**
-- Establish Spectra as the default CI-time upgrade-safety gate for Solana programs, analogous to the role `slither` plays for Solidity.
-- Expand the rule catalogue to cover Token-2022 TLV extensions (currently out of scope) and a richer set of native-program patterns as Shank-IDL adoption grows.
-- Contribute the diff engine as a reusable Rust crate so audit firms and downstream tools can embed it without forking.
+- Establish Spectra as the default CI-time upgrade-regression gate for Solana programs, run alongside the absolute scanners teams already use.
+- Contribute the differ as a reusable Rust crate so audit firms and downstream tools can embed it.
 
 ---
 
 ## Success Metrics
 
-Success is measured against **acceptance tests defined in [`docs/ROADMAP.md`](docs/ROADMAP.md)**, not against adoption marketing numbers. Every metric below is binary (pass/fail) and verifiable from public CI artifacts.
-
-**Engineering metrics (gated per milestone, not subjective):**
+Success is measured against **acceptance tests defined in [`docs/ROADMAP.md`](docs/ROADMAP.md)**, not adoption marketing numbers. Every metric below is binary (pass/fail) and verifiable from public CI artifacts.
 
 | Metric | M0 (shipped) | M1 target | M2 target | M3 target |
 |---|---|---|---|---|
-| Rule types covered | 11 / 23 | 17 / 23 | 20 / 23 | 23 / 23 |
-| Solana edge cases covered ([`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md), n=25) | 6 (24%) | 14 (56%) | 15 (60%) + 2 partial | 17 (68%) + 3 partial |
-| Tests passing (`cargo test --release`) | 8 / 8 ✅ | golden-file suite ≥ 16 / 16 | + corpus harness ≥ 4 / 4 | + suppression-file parse ≥ 4 / 4 |
-| CI gates green | 9 / 9 ✅ | 11 / 11 | 13 / 13 | 14 / 14 |
-| False positives on production IDL (Drift) | 0 / 0 ✅ | 0 / 0 | 0 / 0 | 0 / 0 |
-| Wall-clock on 428 KB Drift IDL | 6 ms ✅ | ≤ 20 ms | ≤ 20 ms (static) + ≤ 60 s (M2 corpus) | ≤ 20 ms |
+| Finding kinds covered | 9 ✅ | + native-program path | maintained | maintained |
+| Tests passing (`cargo test --release --workspace`) | 6 / 6 ✅ | golden-file suite ≥ 1 per finding | + corpus harness | + suppression-file parse |
+| Strictly-differential no-FP property | asserted ✅ | asserted | asserted | asserted |
+| CI gates green | ✅ | ✅ | ✅ | ✅ |
+| Real-world validation | M1.5 deliverable | ≥1 public program pair | maintained | maintained |
 
-**Adoption gates (M4 deliverables, not vanity metrics):**
-
-| Metric | M4 target | How verified |
-|---|---|---|
-| Confirmed pilot integration | ≥ 1 | Public CI logs on pilot's repo running `spectra check` as a gate. |
-| Public integration walkthroughs | ≥ 2 | Plain markdown write-ups committed to this repo's `walkthroughs/`, each linking commits + CI runs + diff reports on a real upgradeable Anchor program. |
-| Community office hour | 1 | Solana Discord AMA recording published. |
-
-**Sustainability gates (post-grant, voluntary commitments):**
-
-| Metric | Commitment |
-|---|---|
-| Issue triage SLA | 7 days during grant period; 14 days for 12 months post-M4. |
-| Critical-bug response | 48 hr from confirmed reproduction. |
-| New BPF-loader version adapter | Published within 4 weeks of mainnet activation. |
-| Apache 2.0 license | Permanent — license change requires a major version bump and 30-day public notice. |
-
-**Non-metrics (intentionally not tracked):**
-
-- GitHub stars, NPM downloads, social media followers — these are vanity metrics that do not measure whether Spectra prevents silent corruption in production upgrades. The acceptance tests above measure that directly.
-- Number of "rules" added vs the published M1–M3 plan — over-rule-ification is a known FP risk and is intentionally bounded at 23 rules through M2. Going beyond requires a documented edge-case entry in [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md) first.
-
----
-
-## Additional Information
-
-**Work Already Completed (pre-grant, at the applicant's own cost):**
-- Complete M0 implementation: Rust core + Python wrapper + GitHub Action scaffold + CI workflow + 8 green tests + 17+ engineering docs.
-- Synthetic-regression fixture demonstrating all 11 M0 rule kinds.
-- Real-world validation on Drift Protocol v2.155 → v2.162 with one detected silent-corruption case.
-- Competitive benchmark against `diff -u`, `jd`, `dyff`, `json-diff` with reproducible methodology.
-- Q1-style technical paper at [`docs/PAPER.md`](docs/PAPER.md) (~600 lines, 9 sections).
-- Apache 2.0 licensing with explicit patent grant.
-
-**Financial Contributions:**
-No other teams or entities have contributed financially to this project. This is an independent development effort funded by the applicant's own time.
-
-**Other Funding Applications:**
-This project has not been submitted for funding to any other entity. The Solana Foundation grant proposal (referenced above) is the first and only funding application for Spectra.
-
-**Technical Considerations:**
-- **License:** Apache 2.0 (matches `solana-verifiable-build`, the Solana SDK, and Anza-published developer tooling; includes an explicit patent grant per Apache §3).
-- **Type safety:** Rust 2021 edition; `cargo clippy --all-targets -- -D warnings` enforced in CI.
-- **Determinism:** All output is deterministic over the same input pair. The identical-IDL-input-emits-zero-findings invariant is asserted in both a test and a CI step.
-- **Semantic versioning:** Will be applied from the first tagged release.
-- **No proprietary dependencies.** Every crate is on crates.io under a permissive license.
-
-**Project Impact:**
-The Solana RFP for Program Verification Tooling explicitly names upgrade-safety regression as a missing layer. Spectra is the smallest credible filling of that gap, deployable in a single CI step, with severity-tiered output that lets teams ratchet enforcement without disabling the gate. By making the silent-corruption and discriminator-collision cases visible *before* deploy rather than after, Spectra reduces the rate at which avoidable on-chain incidents become public — which is the metric the ecosystem actually cares about.
+**Non-metrics (intentionally not tracked):** GitHub stars, downloads, social followers. These do not measure whether Spectra catches account-validation regressions before deploy; the acceptance tests above measure that directly.
 
 ---
 
 ## Documentation Index
 
-Every claim in this README is backed by one of these docs. Start with whichever question you're asking:
-
 | If you want to know… | Read |
 |---|---|
 | The single-file top-level engineering specification | [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md) |
-| The full technical story end-to-end (academic-style) | [`docs/PAPER.md`](docs/PAPER.md) |
-| Whether `git diff` is good enough (no — formal argument) | [`docs/VS_GIT_DIFF.md`](docs/VS_GIT_DIFF.md) |
-| The reproducible synthetic before/after walkthrough | [`docs/BENCHMARK.md`](docs/BENCHMARK.md) |
-| The real-world Drift IDL benchmark | [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md) |
-| Head-to-head against `jd`, `dyff`, `json-diff`, `diff -u` | [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md) |
-| The threat model and adversary classes | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) |
-| Position vs the Foundation's STRIDE/SIRN stack + why Spectra would **not** have caught the Drift exploit | [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md) |
+| Position vs the Foundation's STRIDE/SIRN stack + absolute scanners | [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md) |
 | What Spectra explicitly is **not** | [`docs/NON_GOALS.md`](docs/NON_GOALS.md) |
 | Every rule ID + severity + exit-code contract | [`docs/SEVERITY.md`](docs/SEVERITY.md) |
+| The threat model and adversary classes | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) |
 | Pipeline architecture across M0–M3 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Per-edge-case coverage matrix (25 Solana concerns) | [`docs/SOLANA_EDGE_CASES.md`](docs/SOLANA_EDGE_CASES.md) |
-| How false positives are kept at zero | [`docs/FALSE_POSITIVES.md`](docs/FALSE_POSITIVES.md) |
-| Drop-in GitHub Actions / pre-commit / `cargo make` templates | [`docs/CI_INTEGRATION.md`](docs/CI_INTEGRATION.md) |
+| How false positives are kept near-zero by construction | [`docs/FALSE_POSITIVES.md`](docs/FALSE_POSITIVES.md) |
+| Drop-in GitHub Actions / pre-commit templates | [`docs/CI_INTEGRATION.md`](docs/CI_INTEGRATION.md) |
 | The milestone roadmap (acceptance-test-gated) | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
-| Three-layer detection corpus design | [`docs/CORPUS.md`](docs/CORPUS.md) |
-| M2 bounded-replay architecture | [`docs/REPLAY.md`](docs/REPLAY.md) |
-| Rule engine internals + the M1 `Rule` trait | [`docs/RULE_ENGINE.md`](docs/RULE_ENGINE.md) |
-| `spectra-allow.toml` migration-declaration schema | [`docs/MIGRATION.md`](docs/MIGRATION.md) |
-| Anchor-specific hazards (Borsh, discriminators, zero-copy, events) | [`docs/ANCHOR.md`](docs/ANCHOR.md) |
-| Adoption plan + pilot strategy | [`docs/ADOPTION.md`](docs/ADOPTION.md) |
-| Step-by-step testing guide (host + Docker + real-world IDL) | [`docs/TESTING.md`](docs/TESTING.md) |
+| Step-by-step testing guide (host + Docker) | [`docs/TESTING.md`](docs/TESTING.md) |
 
 ---
 
@@ -584,9 +434,12 @@ Every claim in this README is backed by one of these docs. Start with whichever 
 ```
 spectra/
 ├── spectra-core/          # Rust crate + spectra binary (the actual tool)
+│   ├── src/accounts.rs    #   Anchor #[derive(Accounts)] guard extractor
+│   ├── src/regression.rs  #   strictly-differential differ
+│   └── src/report.rs      #   JSON / Markdown / SARIF renderers
 ├── spectra-cli/           # Python wrapper (subprocess-invokes the Rust bin)
-├── spectra-action/        # GitHub Action scaffold (full Marketplace publish = M3)
-├── examples/              # Synthetic-regression Anchor IDLs for demo + tests
+├── spectra-action/        # GitHub Action scaffold (Marketplace publish = M3)
+├── examples/              # Synthetic baseline → candidate Anchor fixtures
 ├── scripts/record-demo.sh # asciinema recorder for the demo cast
 ├── docs/                  # All engineering documentation (see index above)
 └── .github/workflows/     # CI: fmt + clippy + test + green-demo verification
@@ -604,7 +457,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issue triage SLA during the grant peri
 
 ## Security
 
-Please do not file public issues for exploitable security findings. Vulnerability-reporting policy, supported-versions table, and response SLAs are documented in [`SECURITY.md`](SECURITY.md). Reports go privately to `ayodyadsr@gmail.com`.
+Please do not file public issues for exploitable security findings. Vulnerability-reporting policy is documented in [`SECURITY.md`](SECURITY.md). Reports go privately to `ayodyadsr@gmail.com`.
 
 ## Code of Conduct
 

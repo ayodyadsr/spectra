@@ -60,10 +60,13 @@ Out of scope:
 - Vulnerabilities in upstream dependencies that Spectra does not magnify
   (please report those upstream). Spectra will track and pull upgrades for
   RUSTSEC advisories on its direct dependencies during the grant period.
-- Findings in Solana programs that Spectra fails to detect when the IDL did
-  not expose the relevant change — those are coverage gaps, not security
-  bugs in Spectra. File a regular issue with the `enhancement` label and
-  reference `docs/SOLANA_EDGE_CASES.md`.
+- Guard regressions Spectra does not model because the compensating check
+  lives outside `#[derive(Accounts)]` (e.g. a manual `require!()` in the
+  instruction body — the M1 native path narrows this) — those are
+  documented coverage boundaries, not security bugs in Spectra. File a
+  regular issue with the `enhancement` label and reference
+  [`docs/NON_GOALS.md`](docs/NON_GOALS.md) /
+  [`docs/FALSE_POSITIVES.md`](docs/FALSE_POSITIVES.md).
 
 ## Acknowledgements
 

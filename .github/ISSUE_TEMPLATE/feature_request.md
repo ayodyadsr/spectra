@@ -6,11 +6,11 @@ labels: enhancement
 assignees: ayodyadsr
 ---
 
-> Spectra's scope is intentionally narrow: **security-critical
-> behavioural-regression diffing for Solana program upgrades**. Feature
-> requests outside that scope (general-purpose IDL prettifiers, runtime
-> tracing, fuzzing harnesses, etc.) will be politely declined — see
-> [`docs/NON_GOALS.md`](../../docs/NON_GOALS.md).
+> Spectra's scope is intentionally narrow: **strictly-differential
+> account-validation regression gating for Solana program upgrades**.
+> Feature requests outside that scope (absolute scanning of already-missing
+> checks, IDL diffing, runtime tracing, fuzzing harnesses, etc.) will be
+> politely declined — see [`docs/NON_GOALS.md`](../../docs/NON_GOALS.md).
 
 ## What problem does this solve?
 
@@ -24,23 +24,24 @@ lot.
 
 <!--
 If this is a new detection rule, please describe:
-- The breaking-change pattern (with a minimal IDL diff if possible)
-- Proposed severity (BREAKING / WARN / INFO — see docs/SEVERITY.md)
-- Proposed rule ID (e.g. `account-field-tag-changed`)
-- Expected exit code under the current contract
+- The guard-regression pattern (with a minimal baseline/candidate
+  `#[derive(Accounts)]` diff if possible)
+- Proposed severity (BREAKING / warning — see docs/SEVERITY.md)
+- Proposed rule ID (e.g. `owner_check_removed`)
+- Expected exit code under the current contract (`0`/`1`/`2`)
 -->
 
 ## Alternatives considered
 
 <!--
 Existing tools, manual workflows, or other rules that partially cover
-this. If `diff -u`, `jd`, or another diff tool already catches it,
-explain what they miss.
+this. If `git diff`, an absolute scanner (Sec3 X-Ray, Auditware Radar,
+l3x, Octane), or another tool already catches it, explain what they miss.
 -->
 
 ## Additional context
 
 <!--
 Links to upstream Anchor / SPL changes, related GitHub issues, prior
-incidents, or relevant rows in docs/SOLANA_EDGE_CASES.md.
+incidents, or relevant rows in docs/SEVERITY.md.
 -->

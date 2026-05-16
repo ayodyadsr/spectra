@@ -1,27 +1,27 @@
-name: 'Spectra Program Upgrade Diff'
-description: 'Detect behavioural regressions between two Solana program IDLs in CI'
+name: 'Spectra Account-Validation Regression Gate'
+description: 'Block a Solana program upgrade PR that removes or weakens an account-validation guard the deployed version enforced'
 author: 'Ayodya'
 branding:
   icon: 'shield'
   color: 'purple'
 
 inputs:
-  old-idl:
-    description: 'Path to baseline (v_n) IDL JSON'
+  baseline:
+    description: 'Path to the baseline (last released / on-chain) program source tree'
     required: true
-  new-idl:
-    description: 'Path to new (v_{n+1}) IDL JSON'
+  candidate:
+    description: 'Path to the candidate (upgrade under review) program source tree'
     required: true
   report-path:
-    description: 'Where to write the JSON report'
+    description: 'Where to write the report'
     required: false
     default: 'spectra-report.json'
   format:
-    description: 'Output format passed to spectra (json or markdown)'
+    description: 'Output format passed to spectra (json, markdown, or sarif)'
     required: false
     default: 'json'
   fail-on-breaking:
-    description: 'If true, the step fails when any breaking finding is reported'
+    description: 'If true, the step fails when any breaking regression is reported'
     required: false
     default: 'true'
 
@@ -45,14 +45,14 @@ runs:
       shell: bash
       run: |
         set -e
-        OLD="${{ inputs.old-idl }}"
-        NEW="${{ inputs.new-idl }}"
+        BASELINE="${{ inputs.baseline }}"
+        CANDIDATE="${{ inputs.candidate }}"
         REPORT="${{ inputs.report-path }}"
         FORMAT="${{ inputs.format }}"
         BIN="${{ github.action_path }}/../target/release/spectra"
 
         if [ "${{ inputs.fail-on-breaking }}" = "true" ]; then
-          "$BIN" check --old "$OLD" --new "$NEW" --report "$REPORT" --format "$FORMAT"
+          "$BIN" check --baseline "$BASELINE" --candidate "$CANDIDATE" --report "$REPORT" --format "$FORMAT"
         else
-          "$BIN" check --old "$OLD" --new "$NEW" --report "$REPORT" --format "$FORMAT" || true
+          "$BIN" check --baseline "$BASELINE" --candidate "$CANDIDATE" --report "$REPORT" --format "$FORMAT" || true
         fi

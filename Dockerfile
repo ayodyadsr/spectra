@@ -4,16 +4,19 @@
 #
 # Build:    docker build -t spectra:dev .
 # Demo:     docker run --rm spectra:dev check \
-#               --old /examples/lending_v1.json \
-#               --new /examples/lending_v2.json \
+#               --baseline /examples/vault_baseline \
+#               --candidate /examples/vault_candidate \
 #               --format markdown
+#           # exit 1 — the candidate removes account-validation guards the
+#           # baseline enforced.
 # Identity: docker run --rm spectra:dev check \
-#               --old /examples/lending_v1.json \
-#               --new /examples/lending_v1.json
-#               # exit 0 — zero false positives on identical input.
+#               --baseline /examples/vault_baseline \
+#               --candidate /examples/vault_baseline
+#           # exit 0 — zero false positives: identical input is, by
+#           # construction, not a regression.
 #
-# The image embeds the synthetic-regression fixture under /examples so the
-# Polkadot-grant Testing Guide can be reproduced with no host files.
+# The image embeds the synthetic baseline/candidate Anchor fixtures under
+# /examples so the demo can be reproduced with no host files.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /build

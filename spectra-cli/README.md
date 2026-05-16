@@ -18,7 +18,10 @@ cargo install --path ../spectra-core
 ## Usage
 
 ```bash
-spectra-py check --old examples/lending_v1.json --new examples/lending_v2.json --format markdown
+spectra-py check --baseline examples/vault_baseline --candidate examples/vault_candidate --format markdown
 ```
+
+`--baseline` and `--candidate` are Anchor **Rust source trees** (the last
+released / on-chain version, and the upgrade under review), not IDL JSON.
 
 Identical flags to `spectra check`; see the main repo README.

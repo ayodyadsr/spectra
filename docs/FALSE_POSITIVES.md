@@ -1,113 +1,135 @@
-# False-Positive Mitigation Strategy
+# False Positives — Near-Zero by Construction
 
-A CI-gating tool earns trust by being **right enough often enough** that maintainers do not start treating it as noise. This document is the explicit FP-policy: how Spectra avoids false positives by construction, where it cannot, and how the suppression mechanism (M3) closes the gap.
+A CI-gating tool earns trust by being **right enough, often enough** that
+maintainers never start treating it as noise. Spectra's defining property is
+that its false-positive rate is **near-zero by construction, not by heuristic
+tuning**. This document explains why, where the residual risk is, and how the
+M3 suppression mechanism closes it.
 
 ---
 
-## 1. Defence in five layers
+## 1. Why FP is near-zero by construction
 
-Spectra mitigates false positives at five layers, from strongest to weakest.
+An absolute scanner asks *"is there a missing owner check anywhere in this
+code?"* Any large program has intentionally-unchecked accounts (escape
+hatches, `AccountInfo` forwarded to a CPI), so the scanner must tune a
+heuristic threshold and lives with a false-positive budget.
 
-### Layer 1 — Structural correctness
+Spectra only ever asks *"did this upgrade remove a guard the deployed version
+enforced?"* That reframing removes the heuristic entirely:
 
-Most findings are **definitions**, not heuristics. R-ACC-FIELD-REORDER is true whenever the field order differs; the only way to obtain a false positive is for the user to have already updated their on-chain accounts in lockstep, which is the case M3's `migration_declared` marker addresses.
+### Layer 1 — Differential definition, not heuristic
 
-### Layer 2 — Bounded comparator scope
+A finding is a **set-difference fact**: a guard is present in the baseline
+slot and absent from the candidate slot. There is no threshold, no
+confidence score, no pattern-likelihood. `signer_check_removed` is true iff
+the baseline slot had a `Signer` guard and the candidate slot does not.
 
-Spectra refuses to analyse inputs it does not understand (exit code 3). This means a malformed or schema-unsupported IDL never produces a clean report — it produces an explicit refusal. See [SEVERITY.md](SEVERITY.md) §5.
+### Layer 2 — Identical-input invariant
 
-### Layer 3 — Identical-IDL invariant
+`spectra check --baseline X --candidate X` produces **zero findings, exit
+0**. This is a tested integration invariant and a CI step. Any future change
+that would emit a spurious finding on byte-identical input breaks the build.
 
-The CI suite includes an `Identical-IDL exit-0 check` step that runs `spectra check --old X --new X` and asserts exit 0 + zero findings. This is a permanent regression guard against any future change that would introduce spurious findings on inputs that are byte-identical.
+### Layer 3 — Strictly-differential no-FP property
 
-### Layer 4 — Suppression file (M3)
+The integration suite asserts that an **unchanged context inside an
+otherwise-changed program produces zero findings**. A finding can never name
+a context that did not lose a guard, even when the program as a whole
+changed. This is the property that makes Spectra silent on everything except
+real regressions.
 
-When a true structural change is intentional (e.g. a coordinated migration where the protocol's own code resets accounts), the maintainer declares it in `spectra-allow.toml`:
+### Layer 4 — Downgrade-vs-equivalent-pin logic
+
+The single realistic FP class for a differential differ is a guard that was
+**re-expressed but still enforced**. Spectra handles this in the engine:
+
+| Change | Finding? |
+|---|---|
+| `Account<'info, Mint>` → `#[account(owner = token::ID)] UncheckedAccount` | **No** — owner still pinned |
+| `Account<'info, Mint>` → `UncheckedAccount` (no pin) | `type_cosplay_protection_removed` |
+| `Program<'info, Token>` → `#[account(address = token::ID)] AccountInfo` | **No** — program id still pinned |
+| `Program<'info, Token>` → `UncheckedAccount` | `cpi_target_unpinned` |
+
+The `type_cosplay_protection_removed`, `owner_check_removed`, and
+`cpi_target_unpinned` arms fire only if **no equivalent pin remains**. See
+[SEVERITY.md](SEVERITY.md) §3 and the `diff_slot` logic in
+`spectra-core/src/regression.rs`.
+
+### Layer 5 — Silent on already-missing checks (by construction)
+
+A check that was *already missing in the baseline* is **not** a regression.
+Spectra is deliberately silent — that is the absolute scanners' job. This is
+the single biggest source of would-be noise in an absolute tool, and
+Spectra's differential design eliminates it categorically rather than tuning
+it down.
+
+---
+
+## 2. Residual FP risk and the M3 suppression file
+
+The construction above leaves one residual class: an **intentional, reviewed
+guard relaxation** where a compensating check exists *outside*
+`#[derive(Accounts)]` (a manual `require!()` in the instruction body that the
+M0 engine does not model), or a pre-launch program where no on-chain account
+yet depends on the guard.
+
+M3 introduces `spectra-allow.toml` for exactly this — and only this:
 
 ```toml
-# spectra-allow.toml
 schema_version = 1
 
 [[suppress]]
-rule_id = "R-ACC-FIELD-REORDER"
-target = "Pool"
-rationale = "Pre-launch program — no on-chain accounts exist yet. Verified by checking program-data-account address has no descendant accounts."
-expires = "2026-12-31"
-upgrade_pr = "https://github.com/example/protocol/pull/812"
-migration_declared = false
-
-[[suppress]]
-rule_id = "R-ACC-SILENT-CORRUPT"
-target = "Pool"
-rationale = "Coordinated migration: PR #813 re-initializes all 247 Pool accounts via init_if_needed prior to the upgrade landing."
-expires = "2026-08-15"
-upgrade_pr = "https://github.com/example/protocol/pull/813"
-migration_declared = true
-migration_script = "scripts/reset-pools.ts"
+rule_id      = "owner_check_removed"
+target       = "Withdraw::destination"
+rationale    = "Owner is now enforced by an explicit require!(destination.owner == authority.key()) in the instruction body (PR #813); the #[account] pin was redundant."
+expires      = "2026-12-31"
+upgrade_pr   = "https://github.com/example/protocol/pull/813"
 ```
 
-Required fields:
+Required fields, all enforced at parse time:
 
 - `rule_id` — exact rule ID from [SEVERITY.md](SEVERITY.md).
-- `target` — the specific symbol the suppression applies to (instruction name, account name, etc.).
-- `rationale` — non-empty free text. Spectra **refuses** entries with empty rationale.
-- `expires` — ISO date. Expired suppressions are reported as a separate `R-SUPPRESS-EXPIRED` warning so the file does not silently rot.
-- `upgrade_pr` — URL pointing at the PR where the suppression was introduced.
-- `migration_declared` — boolean. If true, see [MIGRATION.md](MIGRATION.md) for the additional fields.
+- `target` — one `Context::account` symbol. **No `*` wildcards.**
+- `rationale` — non-empty. An empty rationale is **refused**.
+- `expires` — ISO date. An **expired** suppression fails CI (no silent rot).
+- `upgrade_pr` — URL of the PR that introduced the suppression.
 
-Forbidden patterns:
-
-- No `*` wildcard targets. Each suppression names one symbol.
-- No global rule disable. Severities are not configurable; only per-finding suppression is.
-- No silent suppression — every suppression entry produces a line in the report explaining what was suppressed and why.
-
-### Layer 5 — Report transparency
-
-Every report includes a **Suppressions** section listing each entry that fired, with its rationale visible to reviewers. Suppression is not "make the finding disappear" — it is "annotate the finding with a reviewable justification."
+Forbidden by design: global rule disable (severity is not configurable),
+wildcard targets, empty-rationale entries, and silent suppression — every
+suppressed finding still appears in the report, annotated with its
+rationale. Suppression is "annotate the finding with a reviewable
+justification with an expiry," never "make it disappear."
 
 ---
 
-## 2. What counts as a false positive
+## 3. What counts as a false positive
 
-| Case | Spectra's classification |
-|------|--------------------------|
-| Layout change with no existing on-chain accounts | True structural change; **not** an FP. User suppresses with `pre_launch` rationale. |
-| Layout change accompanied by a migration that resets affected accounts | True structural change; **not** an FP. User declares via `migration_declared = true`. |
-| Field rename with all callers updated in lockstep | Structural rename; surfaced for review. User suppresses with rationale if intentional. |
-| Cosmetic JSON formatting change in IDL (whitespace, key order) | Spectra's parser is structural — JSON formatting is not visible. **Not** an FP, and not a finding. |
-| Same IDL diffed against itself | **Tested invariant:** zero findings, exit 0. Any deviation is a Spectra bug. |
-
-The first three cases are not bugs — they are designed user actions backed by `spectra-allow.toml`. The last two are correctness invariants.
+| Case | Classification |
+|---|---|
+| Identical trees diffed | Tested invariant: zero findings, exit 0. Any deviation is a Spectra bug. |
+| Guard re-expressed but still enforced (`Account<T>` → owner-pinned Unchecked) | **Not a finding** — Layer 4 suppresses it in the engine. |
+| Check already missing in the baseline | **Not a finding** — out of scope by construction (absolute-scanner territory). |
+| Guard genuinely removed, but compensated by a manual body check the engine cannot see | True regression *relative to the declarative surface*; surfaced for review; suppressible via M3 with rationale. **Engine FP only in the strict sense that a non-`#[derive(Accounts)]` check exists** — M1 native-path analysis narrows this. |
+| Guard genuinely removed, intentional | True regression, correctly flagged. The maintainer suppresses with rationale + expiry. Not an FP. |
 
 ---
 
-## 3. Measurement plan (M4)
+## 4. Measurement plan (M4)
 
-The proposal commits to **measuring** false-positive rate as part of M4, not asserting it:
+The proposals **measure** the false-positive rate; they do not assert one
+today (`[NO PUBLIC DATA AVAILABLE]` until M4):
 
-- Per-pilot, record every Spectra finding produced during the pilot's upgrade cycle.
-- For each finding, classify as: true regression caught, true regression already known, intentional change (suppressed), or false positive.
-- Publish the per-pilot table in the M4 walkthrough write-up.
-
-The proposal does **not** claim a numeric FP rate today. The mechanism is built; the number comes from real protocol data during M4.
-
----
-
-## 4. Hard non-promises
-
-Spectra does **not**:
-
-- Disable rules globally.
-- Allow wildcard suppression.
-- Permit empty-rationale suppression.
-- Hide suppressed findings from the report.
-
-These are intentional friction. The whole point of the suppression file is that it forces the maintainer to write down **why** a finding is being waived, leaving an audit trail.
+- Per pilot, record every finding produced during the upgrade cycle.
+- Classify each: true regression caught / true regression already known /
+  intentional relaxation (suppressed) / false positive.
+- Publish the per-pilot table in the M4 walkthrough.
 
 ---
 
 ## 5. Cross-references
 
-- Suppression schema lives in [MIGRATION.md](MIGRATION.md) §2.
-- Rule IDs and severities: [SEVERITY.md](SEVERITY.md).
-- Adoption strategy explains how the FP-policy is communicated to maintainers: [ADOPTION.md](ADOPTION.md).
+- Severity + downgrade-vs-pin rule: [SEVERITY.md](SEVERITY.md)
+- Threat-model soundness section: [THREAT_MODEL.md](THREAT_MODEL.md) §3.1
+- Authoritative engine description: [`../TECHNICAL_SPEC.md`](../TECHNICAL_SPEC.md)
+- Why already-missing checks are out of scope: [NON_GOALS.md](NON_GOALS.md)

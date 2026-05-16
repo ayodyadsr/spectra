@@ -1,15 +1,18 @@
 # Testing Guide
 
-Step-by-step guide for reproducing every Spectra M0 acceptance test from a
-clean clone. This file is the canonical testing reference for grant
-reviewers and is referenced by deliverable `0c` in the Spectra roadmap.
+Step-by-step guide for reproducing every Spectra M0 acceptance gate from a
+clean clone. This is the canonical testing reference for grant reviewers.
 
 ## Prerequisites
 
-- Rust stable (1.78+). Spectra pins the toolchain in [`rust-toolchain.toml`](../rust-toolchain.toml) so a `rustup` install is sufficient — no nightly required.
-- Python 3.9+ (only required for the SARIF JSON-parse smoke step and for the optional Python wrapper).
-- Optional: Docker 24+ for the containerised reproduction path.
-- ~5 minutes of wall-clock time on a commodity laptop.
+- Rust stable. The toolchain is pinned in
+  [`rust-toolchain.toml`](../rust-toolchain.toml) (`channel = "stable"`,
+  components `rustfmt` + `clippy`) so a `rustup` install is sufficient — no
+  nightly required.
+- Python 3.9+ (only for the SARIF JSON-parse smoke step and the optional
+  Python wrapper).
+- Optional: Docker 24+ for the containerised path.
+- ~5 minutes on a commodity laptop.
 
 ## 1. Clean-clone reproduction (host build)
 
@@ -17,117 +20,97 @@ reviewers and is referenced by deliverable `0c` in the Spectra roadmap.
 git clone https://github.com/ayodyadsr/spectra
 cd spectra
 
-# Static checks
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-
-# Build
 cargo build --release --workspace
-
-# Run the full test suite (8 tests)
 cargo test --release --workspace
 ```
 
-Expected outcome:
+Expected:
 
 - `cargo fmt --check` exits 0 (no diff).
 - `cargo clippy -D warnings` exits 0 (no lints).
-- `cargo build --release` succeeds in under 60 seconds with cargo cache cold.
-- `cargo test --release` reports **8 passed, 0 failed**.
+- `cargo build --release` succeeds.
+- `cargo test --release` reports **6 passed, 0 failed** (integration suite).
 
 ## 2. End-to-end CLI gates
 
 The CI workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
-runs these gates on every push. They can be replayed locally:
+runs these on every push; replay locally:
 
-| Gate | Command | Expected exit | What it verifies |
+| Gate | Command | Exit | Verifies |
 |---|---|---|---|
-| Synthetic regression — markdown | `./target/release/spectra check --old examples/lending_v1.json --new examples/lending_v2.json --format markdown` | `1` | 4 BREAKING + 2 warning findings render. |
-| Synthetic regression — JSON | same with `--format json` | `1` | JSON shape parses, `breaking_count >= 1`. |
-| Synthetic regression — SARIF | same with `--format sarif --report out.sarif` | `1` | SARIF 2.1.0 parses, `runs[0].results.length >= 6`. |
-| Identical-IDL invariant | `./target/release/spectra check --old examples/lending_v1.json --new examples/lending_v1.json --format markdown` | `0` | Zero false positives. |
-| Invocation error | `./target/release/spectra check --old examples/lending_v1.json --new examples/lending_v2.json --format definitely-not-a-format` | `2` | Exit-code contract: bad invocation ≠ regression. |
-| Quiet no-output-on-clean | `./target/release/spectra check --old examples/lending_v1.json --new examples/lending_v1.json --format markdown --quiet` | `0` (and zero stdout) | Clean CI runs produce no noise. |
+| Regression — Markdown | `./target/release/spectra check --baseline examples/vault_baseline --candidate examples/vault_candidate --format markdown` | `1` | 6 BREAKING + 1 warning render |
+| Regression — JSON | same with `--format json` | `1` | JSON parses, `breaking_count == 6` |
+| Regression — SARIF | same with `--format sarif --report out.sarif` | `1` | SARIF 2.1.0 parses, `runs[0].results.length == 7` |
+| Strictly-differential invariant | `./target/release/spectra check --baseline examples/vault_baseline --candidate examples/vault_baseline` | `0` | Zero findings — no FP on identical input |
+| Invocation error | same with `--format definitely-not-a-format` | `2` | Bad invocation ≠ regression |
+| Quiet, no output on clean | identical-tree run with `--quiet` | `0` (zero stdout) | Clean CI runs produce no noise |
 
-A one-line reproduction of all six is also available via `make demo` (see [`Makefile`](../Makefile)).
+One-line reproduction of all gates: `make demo` (see
+[`Makefile`](../Makefile)).
 
-## 3. Docker reproduction (containerised path)
-
-For reviewers who want a hermetic build with no Rust toolchain on the host:
+## 3. Docker reproduction (containerised)
 
 ```bash
 docker build -t spectra:test .
 
-# Synthetic regression — must exit 1
+# Regression — must exit 1
 docker run --rm spectra:test check \
-  --old /examples/lending_v1.json \
-  --new /examples/lending_v2.json \
+  --baseline /examples/vault_baseline \
+  --candidate /examples/vault_candidate \
   --format markdown
 
-# Identical IDL — must exit 0
+# Identical tree — must exit 0
 docker run --rm spectra:test check \
-  --old /examples/lending_v1.json \
-  --new /examples/lending_v1.json \
+  --baseline /examples/vault_baseline \
+  --candidate /examples/vault_baseline \
   --format markdown
 ```
 
-The Docker image is also built and smoke-tested on every CI push in the
-`docker` job — reviewers can verify by browsing [Spectra CI runs](https://github.com/ayodyadsr/spectra/actions).
+The image is also built and smoke-tested in the `docker` CI job on every
+push.
 
-## 4. Real-world IDL reproduction
+## 4. Real-world reproduction
 
-To reproduce the Drift Protocol v2.155 → v2.162 benchmark (428 KB
-production IDL, 6 ms wall-clock, 6 findings including one real
-silent-corruption case), follow the step-by-step commands in
-[`docs/BENCHMARK_DRIFT.md`](BENCHMARK_DRIFT.md).
+A reproducible benchmark against a real public Anchor program's
+deployed-vs-upgrade **source** pair is an explicit **M1.5** deliverable. No
+real-world detection or wall-clock number is asserted at M0:
+`[NO PUBLIC DATA AVAILABLE]` until M1.5 ships the committed report and the
+exact reproduction commands.
 
-## 5. Competitive benchmark reproduction
+## 5. Per-test mapping
 
-Head-to-head against `diff -u`, `jd`, `dyff`, `json-diff` on the same
-Drift IDL pair — commands and exact tool versions in
-[`docs/COMPETITIVE_BENCHMARK.md`](COMPETITIVE_BENCHMARK.md).
+The 6 integration tests gated by `cargo test --release`
+(`spectra-core/tests/integration_test.rs`):
 
-## 6. Per-test mapping
+| Test fn | Verifies |
+|---|---|
+| `synthetic_upgrade_detects_account_validation_regressions` | The `vault_baseline` → `vault_candidate` fixture yields exactly 6 BREAKING + 1 warning, exit-equivalent state. |
+| `identical_program_produces_clean_report` | `--baseline X --candidate X` → zero findings, clean. |
+| `unchanged_context_in_changed_program_produces_no_false_positive` | The strictly-differential property: an unchanged context inside an otherwise-changed program produces **no** finding. |
+| `sarif_output_is_valid` | SARIF 2.1.0 parses; driver name `Spectra`; 9 rules; 7 results on the fixture. |
+| `sarif_clean_report_has_zero_results` | A clean run emits valid SARIF with an empty `results` array. |
+| `markdown_renderer_calls_out_signer_regression` | The Markdown renderer surfaces the `signer_check_removed` row correctly. |
 
-The 8 tests gated by `cargo test --release`:
+## 6. How to add a new test (M1 onward)
 
-| Test name | Type | Location | Verifies |
-|---|---|---|---|
-| `anchor_instruction_discriminator_matches_known_vector` | unit | `spectra-core/src/discriminator.rs` | `sha256("global:initialize")[..8] = afaf6d1f0d989bed` |
-| `account_discriminator_changes_with_name` | unit | `spectra-core/src/discriminator.rs` | Different names yield different discriminators. |
-| `synthetic_regression_demo_detects_breaking_changes` | integration | `spectra-core/tests/` | 4 BREAKING + 2 warning on the bundled fixture. |
-| `identical_idls_produce_clean_report` | integration | `spectra-core/tests/` | Zero findings on `--old X --new X`. |
-| `no_false_collision_on_synthetic_fixture` | integration | `spectra-core/tests/` | Non-colliding names are not flagged. |
-| `sarif_output_is_valid_for_synthetic_fixture` | integration | `spectra-core/tests/` | SARIF JSON parses, required keys present. |
-| `sarif_clean_report_has_zero_results` | integration | `spectra-core/tests/` | Clean run emits valid SARIF with empty `results`. |
-| `markdown_renderer_still_produces_silent_corruption_row` | integration | `spectra-core/tests/` | Silent-corruption finding renders correctly. |
+Minimum bar for any new finding kind:
 
-## 7. How to add a new test (M1 onwards)
+1. Add a baseline/candidate fixture pair under
+   `examples/regressions/<rule>/{baseline,candidate}/`.
+2. Add a golden integration test that calls `diff_programs` and asserts the
+   expected `Finding` variant + count.
+3. Add the rule + severity to [SEVERITY.md](SEVERITY.md) (canonical rule ID).
+4. Add the boundary statement to [NON_GOALS.md](NON_GOALS.md) if it narrows a
+   documented non-goal.
+5. `cargo test --release` — the new test passes and no existing test
+   regresses.
 
-The M1 deliverable ships a `docs/TESTING_M1.md` extension that documents
-golden-file fixture additions. The minimum bar for any new rule:
+## 7. Reporting test failures
 
-1. Add a fixture pair under `examples/regressions/<rule>/{v1,v2}.json`.
-2. Add a golden-file integration test that calls `diff_idls` and asserts
-   the expected `Finding` variant + count.
-3. Add a new row in `docs/SOLANA_EDGE_CASES.md` describing the edge case
-   and its detection layer.
-4. Add the rule + severity to `docs/SEVERITY.md` (canonical rule ID +
-   exit-code contract).
-5. Run `cargo test --release` — the new test must pass and no existing
-   test may regress.
-
-## 8. Reporting test failures
-
-If any of the above commands fails on a clean clone of `main`, please
-open a GitHub issue using the **Bug report** template at
-[github.com/ayodyadsr/spectra/issues/new](https://github.com/ayodyadsr/spectra/issues/new)
-and include:
-
-- Your OS + `rustc --version` + `cargo --version`.
-- The commit hash of `main` you cloned (`git rev-parse HEAD`).
-- The exact command run and its full stderr.
-
-Security-related test failures (e.g. Spectra fails to flag a known
-silent-corruption case in a public fixture) should be reported privately
-per [`SECURITY.md`](../SECURITY.md).
+If any command above fails on a clean clone of `main`, open a GitHub issue
+using the **Bug report** template and include: OS + `rustc --version` +
+`cargo --version`; `git rev-parse HEAD`; the exact command and full stderr.
+Security-relevant failures (Spectra fails to flag a known guard regression in
+a public fixture) go privately per [`SECURITY.md`](../SECURITY.md).

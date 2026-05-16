@@ -1,7 +1,7 @@
 use spectra_core::{
-    diff_idls,
+    diff_programs,
     report::{render_markdown, render_sarif},
-    Finding, Idl,
+    Finding, ProgramModel,
 };
 use std::path::PathBuf;
 
@@ -9,166 +9,156 @@ fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples")
 }
 
+fn baseline() -> ProgramModel {
+    ProgramModel::from_source_dir(&examples_dir().join("vault_baseline")).expect("parse baseline")
+}
+
+fn candidate() -> ProgramModel {
+    ProgramModel::from_source_dir(&examples_dir().join("vault_candidate")).expect("parse candidate")
+}
+
 #[test]
-fn synthetic_regression_demo_detects_breaking_changes() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
-    let report = diff_idls(&old, &new);
+fn synthetic_upgrade_detects_account_validation_regressions() {
+    let report = diff_programs(&baseline(), &candidate());
 
     assert!(
         !report.is_clean(),
-        "expected regressions, got clean report: {:#?}",
+        "expected regressions, got clean: {:#?}",
         report
     );
-    assert!(
-        report.breaking_count >= 4,
-        "expected >=4 breaking findings (incl. silent-corruption), got {} (full report: {:#?})",
-        report.breaking_count,
-        report
+    assert_eq!(
+        report.breaking_count, 6,
+        "expected exactly 6 breaking findings, got {}: {:#?}",
+        report.breaking_count, report
+    );
+    assert_eq!(
+        report.warning_count, 1,
+        "expected exactly 1 warning finding, got {}: {:#?}",
+        report.warning_count, report
     );
 
-    let has_withdraw_removed = report
-        .findings
-        .iter()
-        .any(|f| matches!(f, Finding::InstructionRemoved { name, .. } if name == "withdraw"));
+    let has = |pred: fn(&Finding) -> bool| report.findings.iter().any(pred);
+
     assert!(
-        has_withdraw_removed,
-        "expected withdraw instruction removed"
+        has(|f| matches!(f, Finding::SignerCheckRemoved { account, .. } if account == "authority")),
+        "expected SignerCheckRemoved on authority"
     );
-
-    let has_deposit_args_changed = report
-        .findings
-        .iter()
-        .any(|f| matches!(f, Finding::InstructionArgsChanged { name, .. } if name == "deposit"));
-    assert!(has_deposit_args_changed, "expected deposit args changed");
-
-    let has_pool_reorder = report
-        .findings
-        .iter()
-        .any(|f| matches!(f, Finding::AccountFieldReordered { account, .. } if account == "Pool"));
-    assert!(has_pool_reorder, "expected Pool field reorder");
-
-    let has_silent_corruption = report.findings.iter().any(|f| {
-        matches!(f, Finding::AccountLayoutChangedSameDiscriminator { account, .. } if account == "Pool")
-    });
     assert!(
-        has_silent_corruption,
-        "expected Pool silent-corruption finding (layout changed, discriminator unchanged)"
+        has(|f| matches!(
+            f,
+            Finding::TypeCosplayProtectionRemoved { account, .. } if account == "destination"
+        )),
+        "expected TypeCosplayProtectionRemoved on destination"
+    );
+    assert!(
+        has(|f| matches!(
+            f,
+            Finding::HasOneConstraintRemoved { account, .. } if account == "vault"
+        )),
+        "expected HasOneConstraintRemoved on vault"
+    );
+    assert!(
+        has(|f| matches!(
+            f,
+            Finding::CustomConstraintRemoved { account, .. } if account == "destination"
+        )),
+        "expected CustomConstraintRemoved on destination"
+    );
+    assert!(
+        has(|f| matches!(
+            f,
+            Finding::PdaDerivationRemoved { account, .. } if account == "config"
+        )),
+        "expected PdaDerivationRemoved on config"
+    );
+    assert!(
+        has(|f| matches!(
+            f,
+            Finding::CpiTargetUnpinned { account, .. } if account == "token_program"
+        )),
+        "expected CpiTargetUnpinned on token_program"
+    );
+    assert!(
+        has(|f| matches!(
+            f,
+            Finding::UnvalidatedAccountIntroduced { account, .. } if account == "anyone"
+        )),
+        "expected UnvalidatedAccountIntroduced on EmergencyDrain::anyone"
     );
 }
 
 #[test]
-fn identical_idls_produce_clean_report() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = old.clone();
-    let report = diff_idls(&old, &new);
-    assert!(
-        report.is_clean(),
-        "expected clean report, got {:#?}",
-        report
-    );
+fn identical_program_produces_clean_report() {
+    let b = baseline();
+    let report = diff_programs(&b, &b.clone());
+    assert!(report.is_clean(), "expected clean, got {:#?}", report);
     assert_eq!(report.findings.len(), 0);
 }
 
-/// Constructs a small IDL pair where two account names hash to colliding
-/// 8-byte discriminators. We can't easily force a collision via natural names
-/// at test time, so we exercise the detector via two-instructions-with-same-name
-/// edge case is impossible (names are unique by construction). Instead, we
-/// confirm the detector at least runs cleanly on the synthetic fixture and
-/// produces zero false collision findings.
 #[test]
-fn no_false_collision_on_synthetic_fixture() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
-    let report = diff_idls(&old, &new);
-    let collisions: Vec<_> = report
+fn unchanged_context_in_changed_program_produces_no_false_positive() {
+    // `Initialize` is byte-identical baseline↔candidate. The strictly-
+    // differential property: no finding may name the `Initialize` context.
+    let report = diff_programs(&baseline(), &candidate());
+    let initialize_findings: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| matches!(f, Finding::DiscriminatorCollision { .. }))
+        .filter(|f| {
+            let s = format!("{:?}", f);
+            s.contains("Initialize")
+        })
         .collect();
     assert!(
-        collisions.is_empty(),
-        "expected zero discriminator collisions on the synthetic fixture, got {}: {:#?}",
-        collisions.len(),
-        collisions
+        initialize_findings.is_empty(),
+        "unchanged Initialize context must yield zero findings, got {:#?}",
+        initialize_findings
     );
 }
 
 #[test]
-fn sarif_output_is_valid_for_synthetic_fixture() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
-    let report = diff_idls(&old, &new);
+fn sarif_output_is_valid() {
+    let report = diff_programs(&baseline(), &candidate());
+    let sarif = render_sarif(&report, "examples/vault_candidate");
+    let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF parses as JSON");
 
-    let sarif_text = render_sarif(&report, "examples/lending_v2.json");
-    let parsed: serde_json::Value =
-        serde_json::from_str(&sarif_text).expect("SARIF output must parse as JSON");
+    assert_eq!(parsed["version"], "2.1.0");
+    assert!(parsed["$schema"].is_string());
+    let runs = parsed["runs"].as_array().expect("runs array");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["tool"]["driver"]["name"], "Spectra");
+    assert!(runs[0]["tool"]["driver"]["rules"]
+        .as_array()
+        .map(|r| !r.is_empty())
+        .unwrap_or(false));
 
-    assert_eq!(parsed["version"], "2.1.0", "SARIF version must be 2.1.0");
-    assert!(parsed["$schema"].is_string(), "SARIF must declare $schema");
-
-    let runs = parsed["runs"].as_array().expect("runs must be an array");
-    assert_eq!(runs.len(), 1, "expected exactly one SARIF run");
-    let run = &runs[0];
-
-    assert_eq!(run["tool"]["driver"]["name"], "Spectra");
-    assert!(
-        run["tool"]["driver"]["rules"]
-            .as_array()
-            .map(|r| !r.is_empty())
-            .unwrap_or(false),
-        "rules catalog must be non-empty"
-    );
-
-    let results = run["results"].as_array().expect("results must be an array");
-    assert_eq!(
-        results.len(),
-        report.findings.len(),
-        "SARIF result count must match Finding count"
-    );
-
-    let has_silent_corruption_error = results.iter().any(|r| {
-        r["ruleId"] == "account_layout_changed_same_discriminator" && r["level"] == "error"
-    });
-    assert!(
-        has_silent_corruption_error,
-        "silent-corruption finding must appear as level=error in SARIF"
-    );
-
+    let results = runs[0]["results"].as_array().expect("results array");
+    assert_eq!(results.len(), report.findings.len());
+    assert!(results
+        .iter()
+        .any(|r| r["ruleId"] == "signer_check_removed" && r["level"] == "error"));
     for r in results {
-        let loc = &r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"];
-        assert_eq!(
-            loc, "examples/lending_v2.json",
-            "every result must carry the new-IDL artifact location"
-        );
+        let uri = &r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"];
+        assert_eq!(uri, "examples/vault_candidate");
     }
 }
 
 #[test]
 fn sarif_clean_report_has_zero_results() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = old.clone();
-    let report = diff_idls(&old, &new);
-    let sarif_text = render_sarif(&report, "examples/lending_v1.json");
-    let parsed: serde_json::Value = serde_json::from_str(&sarif_text).expect("parse SARIF");
-    let results = parsed["runs"][0]["results"]
-        .as_array()
-        .expect("results array");
-    assert!(
-        results.is_empty(),
-        "identical input must produce zero SARIF results, got {}",
-        results.len()
-    );
+    let b = baseline();
+    let report = diff_programs(&b, &b.clone());
+    let sarif = render_sarif(&report, "examples/vault_baseline");
+    let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("parse SARIF");
+    let results = parsed["runs"][0]["results"].as_array().expect("results");
+    assert!(results.is_empty(), "got {} results", results.len());
 }
 
 #[test]
-fn markdown_renderer_still_produces_silent_corruption_row() {
-    let old = Idl::from_path(&examples_dir().join("lending_v1.json")).expect("load v1");
-    let new = Idl::from_path(&examples_dir().join("lending_v2.json")).expect("load v2");
-    let report = diff_idls(&old, &new);
+fn markdown_renderer_calls_out_signer_regression() {
+    let report = diff_programs(&baseline(), &candidate());
     let md = render_markdown(&report);
     assert!(
-        md.contains("account_layout_changed_same_discriminator"),
-        "markdown must call out silent-corruption finding by kind"
+        md.contains("signer_check_removed"),
+        "markdown must name the signer regression by rule id"
     );
+    assert!(md.contains("BREAKING"));
 }

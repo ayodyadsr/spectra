@@ -40,8 +40,8 @@ jobs:
       - name: Demo run (markdown)
         run: |
           ./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v2.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_candidate \
             --format markdown \
             --report spectra-demo-report.md || EXIT=$?
           echo "Spectra exit code: ${EXIT:-0} (expected 1 for breaking findings)"
@@ -50,35 +50,35 @@ jobs:
       - name: Demo run (json)
         run: |
           ./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v2.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_candidate \
             --format json \
             --report spectra-demo-report.json || true
 
-      - name: Identical-IDL exit-0 check (no false positives)
+      - name: Identical-tree exit-0 check (no false positives)
         run: |
           ./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v1.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_baseline \
             --format markdown > /dev/null
-          echo "Identical-IDL run exited 0 as required."
+          echo "Identical-tree run exited 0 as required (strictly-differential: no regression)."
 
       - name: SARIF output smoke check
         run: |
           ./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v2.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_candidate \
             --format sarif \
             --report spectra-demo-report.sarif || EXIT=$?
           test "${EXIT:-0}" = "1" || (echo "Expected exit 1 on synthetic regression in SARIF mode"; exit 1)
-          python3 -c "import json,sys; d=json.load(open('spectra-demo-report.sarif')); assert d['version']=='2.1.0', 'bad SARIF version'; assert d['runs'][0]['tool']['driver']['name']=='Spectra'; assert len(d['runs'][0]['results'])>=6, 'expected >=6 results'; print('SARIF OK: '+str(len(d['runs'][0]['results']))+' results')"
+          python3 -c "import json,sys; d=json.load(open('spectra-demo-report.sarif')); assert d['version']=='2.1.0', 'bad SARIF version'; assert d['runs'][0]['tool']['driver']['name']=='Spectra'; assert len(d['runs'][0]['results'])==7, 'expected 7 results (6 breaking + 1 warning)'; print('SARIF OK: '+str(len(d['runs'][0]['results']))+' results')"
 
       - name: Quiet-mode exit-2 check (unknown --format)
         run: |
           set +e
           ./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v2.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_candidate \
             --format definitely-not-a-format > /dev/null 2>&1
           EXIT=$?
           set -e
@@ -88,8 +88,8 @@ jobs:
       - name: Quiet-mode no-output-on-clean check
         run: |
           OUT=$(./target/release/spectra check \
-            --old examples/lending_v1.json \
-            --new examples/lending_v1.json \
+            --baseline examples/vault_baseline \
+            --candidate examples/vault_baseline \
             --format markdown --quiet)
           test -z "$OUT" || (echo "Expected --quiet on clean run to produce empty stdout"; exit 1)
           echo "--quiet suppressed stdout on clean run as required."
@@ -126,18 +126,18 @@ jobs:
         run: |
           set +e
           docker run --rm spectra:ci check \
-            --old /examples/lending_v1.json \
-            --new /examples/lending_v2.json \
+            --baseline /examples/vault_baseline \
+            --candidate /examples/vault_candidate \
             --format markdown > /dev/null
           EXIT=$?
           set -e
           test "$EXIT" = "1" || (echo "Expected exit 1 from container demo, got $EXIT"; exit 1)
           echo "Container demo exited 1 as required."
 
-      - name: Smoke — identical IDL exits 0 (no false positives)
+      - name: Smoke — identical tree exits 0 (no false positives)
         run: |
           docker run --rm spectra:ci check \
-            --old /examples/lending_v1.json \
-            --new /examples/lending_v1.json \
+            --baseline /examples/vault_baseline \
+            --candidate /examples/vault_baseline \
             --format markdown > /dev/null
-          echo "Container identical-IDL run exited 0 as required."
+          echo "Container identical-tree run exited 0 as required."

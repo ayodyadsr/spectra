@@ -8,14 +8,14 @@ test:
 
 demo: build
 	./target/release/spectra check \
-		--old examples/lending_v1.json \
-		--new examples/lending_v2.json \
+		--baseline examples/vault_baseline \
+		--candidate examples/vault_candidate \
 		--format markdown
 
 demo-json: build
 	./target/release/spectra check \
-		--old examples/lending_v1.json \
-		--new examples/lending_v2.json \
+		--baseline examples/vault_baseline \
+		--candidate examples/vault_candidate \
 		--format json
 
 lint:

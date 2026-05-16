@@ -6,9 +6,10 @@ labels: bug
 assignees: ayodyadsr
 ---
 
-> If this is a **security finding** in Spectra itself (Spectra mislabels a
-> dangerous upgrade as safe, mis-routes a discriminator, etc.) — do **not**
-> file it here. Please report privately per [SECURITY.md](../../SECURITY.md).
+> If this is a **security finding** in Spectra itself (Spectra fails to flag
+> an upgrade that removed an account-validation guard the baseline enforced,
+> i.e. a false negative) — do **not** file it here. Please report privately
+> per [SECURITY.md](../../SECURITY.md).
 
 ## Summary
 
@@ -23,14 +24,15 @@ assignees: ayodyadsr
 
 ## Reproduction
 
-Minimum commands and IDL snippets to reproduce:
+Minimum commands and source snippets to reproduce:
 
 ```bash
-spectra check --old <path> --new <path> --format <fmt>
+spectra check --baseline <DIR> --candidate <DIR> --format <fmt>
 ```
 
-If the IDLs can be shared publicly, please attach minimised versions
-(strip program-specific fields that are not load-bearing for the bug).
+If the source can be shared publicly, please attach a minimised
+baseline/candidate `#[derive(Accounts)]` pair (strip code that is not
+load-bearing for the bug).
 
 ## Expected behaviour
 
@@ -44,4 +46,4 @@ If the IDLs can be shared publicly, please attach minimised versions
 
 ## Additional context
 
-<!-- Links to commits, prior issues, related rules in docs/SOLANA_EDGE_CASES.md, etc. -->
+<!-- Links to commits, prior issues, related rules in docs/SEVERITY.md, etc. -->

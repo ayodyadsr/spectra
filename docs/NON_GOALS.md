@@ -14,6 +14,7 @@ This document is referenced from the README so reviewers can verify Spectra is n
 | **Replace audit firms.** | The audit happens in code review. Spectra's only role is to make compatibility regressions visible during review. | Audit firms (OtterSec, Neodyme, Sec3, Halborn). |
 | **Verify build reproducibility.** | "Does the deployed bytecode match the source?" is `solana-verifiable-build` / `solana-verify`. Spectra trusts the IDL inputs it is given. | `solana-verifiable-build`. |
 | **Detect runtime exploits.** | Spectra runs pre-merge, in CI. It does not watch mainnet. | Hypernative, Range. |
+| **Detect the Drift-exploit class (social engineering, multisig compromise, durable-nonce abuse, fictitious collateral).** | None of these touch the IDL. The April 2026 Drift exploit produced zero IDL/discriminator/layout changes; no IDL-diff tool or pre-deploy static analyser could detect it. The Drift IDL pair is a *fixture* here, not a prevention claim. | STRIDE pillars (operational security, access controls, multisig configurations, key management) + SIRN incident response. |
 | **Enforce protocol invariants.** | "Total supply must never decrease" is a protocol invariant. Spectra has no DSL for them. | Protocol-specific assertions in code + audit-firm work. |
 | **Detect Token-2022 TLV layout changes.** | IDL does not represent TLV. | A separate Token-2022 detector pack (listed as Future Expansion in the grant proposal). |
 | **Detect Token-2022 transfer-hook reentrancy.** | Out of structural-diff scope. | Separate detector pack. |
@@ -60,3 +61,4 @@ That is the entire promise. Everything in this document is outside it.
 - Full edge-case matrix: [SOLANA_EDGE_CASES.md](SOLANA_EDGE_CASES.md).
 - Threat model that frames these non-goals: [THREAT_MODEL.md](THREAT_MODEL.md).
 - Architecture that enforces the determinism non-goal-of-randomness: [ARCHITECTURE.md](ARCHITECTURE.md).
+- Position vs the Foundation's STRIDE/SIRN stack + the Drift detection-boundary analysis: [STRIDE_GAP_ANALYSIS.md](STRIDE_GAP_ANALYSIS.md).

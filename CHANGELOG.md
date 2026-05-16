@@ -13,6 +13,7 @@ Solana Foundation grant submission. Future tagged releases (`v0.2.0-m1`,
 ## [Unreleased]
 
 ### Added
+- `docs/STRIDE_GAP_ANALYSIS.md` — maps Spectra against the Solana Foundation's post-April-2026 security stack (STRIDE / SIRN / recommended free-ecosystem tools), showing the pre-merge / upgrade-time CI-gate position is unoccupied; §5 documents honestly why Spectra would **not** have detected the April 2026 Drift exploit (social-engineering / multisig / durable-nonce class, not an IDL-diff class). Linked from README documentation index and `docs/NON_GOALS.md`.
 - Inline Rustdoc on all public crate items in `spectra-core` (lib, idl, diff, discriminator, report). Enforced by `#![warn(missing_docs)]` + `RUSTFLAGS="-D warnings"` in CI.
 - `Dockerfile` + `.dockerignore` enabling hermetic containerised reproduction of the M0 acceptance gates; new `docker` CI job builds the image and runs the synthetic-regression + identical-IDL smoke tests on every push.
 - `SECURITY.md` vulnerability-reporting policy with supported-versions table and response SLAs (48 hr ack, 7 d triage, 30 d Critical/High fix).
@@ -22,6 +23,7 @@ Solana Foundation grant submission. Future tagged releases (`v0.2.0-m1`,
 
 ### Changed
 - README cross-references updated to point at `SECURITY.md`, `Dockerfile`, `docs/TESTING.md`, and `CODE_OF_CONDUCT.md` now that they exist.
+- README "Need Identification" / "Similar Projects" rewritten: removed reliance on the closed 2024 program-verification RFP; reframed around the post-STRIDE lifecycle gap; added an explicit honest detection-boundary statement that Spectra would not have caught the Drift exploit (the Drift IDL pair is a correctness/perf fixture, not a prevention claim). `docs/NON_GOALS.md` gains a matching non-goal row.
 
 ## [0.1.0-m0] — 2026-05-15
 

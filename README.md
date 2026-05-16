@@ -120,17 +120,22 @@ The middle row is the gap the open [Solana RFP](https://forum.solana.com/t/progr
 - **Zero false positives on identical input.** Asserted by both a test and a dedicated CI step against a 428 KB real production IDL.
 
 **Need Identification:**
-The need was identified directly in the Solana Foundation's open RFP thread `forum.solana.com/t/program-verification-tooling/1032`, which calls out upgrade-safety regression as a missing layer. The bug classes Spectra detects (silent-corruption, discriminator-collision, Borsh arg widening, account field reorder) match the failure modes named in the RFP and seen in the Drift v2.155 → v2.162 upgrade pair Spectra was validated against.
+The CI-time / pre-merge upgrade-safety regression layer is unoccupied in the Solana Foundation's post-April-2026 security stack. After the Drift exploit, the Foundation consolidated its security investment around **STRIDE** (post-deployment operational evaluation, led by Asymmetric Research) and **SIRN** (incident response), plus a recommended set of free-ecosystem tools (Sec3 X-Ray, AuditWare Radar, Riverguard, Hypernative, Range). Every one of those operates either on a single source snapshot or post-deployment. None gates an *upgrade PR* on whether the new IDL silently corrupts existing on-chain accounts or collides discriminators. Full lifecycle mapping: [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md).
+
+**Honest detection boundary — the Drift exploit:** the Drift v2.155 → v2.162 IDL pair is used here as a real-world correctness + performance **fixture**. It is *not* a claim that Spectra would have prevented the April 2026 Drift exploit — it would not have. That exploit was social engineering → compromised signing devices → misleading multisig approvals → durable-nonce abuse → fictitious collateral (a STRIDE-pillar problem, not an IDL-diff problem). Spectra detects a *different*, narrow class of upgrade hazard. See [`docs/STRIDE_GAP_ANALYSIS.md §5`](docs/STRIDE_GAP_ANALYSIS.md).
 
 **Similar Projects in the Solana Ecosystem:**
-After research across the Solana forum, the Anchor and Foundation GitHub orgs, and prior grant rounds, no public tool was found that performs **upgrade-safety regression** specifically. The closest layers are:
+No public tool performs **pre-merge upgrade-safety regression** specifically. The closest layers, and why each is a different lifecycle stage:
 
 - **`solana-verifiable-build` / `anchor verify`** — verifies *that the deployed bytecode came from a given source tree*, not whether the new version is compatible with old on-chain state. Different layer.
+- **STRIDE (Asymmetric Research)** — evaluates a *deployed* protocol's operational/multisig/governance posture; does not fire on an upgrade PR or diff IDL between versions. One lifecycle stage later than Spectra.
+- **Sec3 X-Ray / AuditWare Radar** — single-snapshot static source analysers; no notion of "the previous version", so they cannot detect a silent layout regression *relative to deployed state*.
+- **Riverguard (Neodyme)** — replays known exploit transactions; does not diff IDLs or detect same-discriminator-different-layout corruption.
 - **Audit-firm formal verification (OtterSec, Halborn, etc.)** — proves invariants on a specific revision, engagement-internal, ~$15k–$100k. Different cost class and scope.
 - **`diff -u` / `jd` / `dyff` / `json-diff`** — generic text/JSON diff tools. Benchmarked head-to-head in [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md); none knows what an Anchor discriminator is, so none can detect silent-corruption.
 - **Hypernative / Range** — runtime monitors that fire *after* a bad upgrade ships. Different layer (post-deploy).
 
-Spectra is therefore complementary, not substitutive, to every tool in this list.
+Spectra is therefore complementary, not substitutive, to every tool in this list — including STRIDE.
 
 ---
 
@@ -556,6 +561,7 @@ Every claim in this README is backed by one of these docs. Start with whichever 
 | The real-world Drift IDL benchmark | [`docs/BENCHMARK_DRIFT.md`](docs/BENCHMARK_DRIFT.md) |
 | Head-to-head against `jd`, `dyff`, `json-diff`, `diff -u` | [`docs/COMPETITIVE_BENCHMARK.md`](docs/COMPETITIVE_BENCHMARK.md) |
 | The threat model and adversary classes | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) |
+| Position vs the Foundation's STRIDE/SIRN stack + why Spectra would **not** have caught the Drift exploit | [`docs/STRIDE_GAP_ANALYSIS.md`](docs/STRIDE_GAP_ANALYSIS.md) |
 | What Spectra explicitly is **not** | [`docs/NON_GOALS.md`](docs/NON_GOALS.md) |
 | Every rule ID + severity + exit-code contract | [`docs/SEVERITY.md`](docs/SEVERITY.md) |
 | Pipeline architecture across M0–M3 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
